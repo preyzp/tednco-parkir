@@ -575,12 +575,17 @@ Akses lintas tenant hanya untuk fungsi administratif yang sah dan diaudit.
 
 ## 6. Component System
 
-### Keputusan library dan tema
+### Standar frontend: shadcn/ui, ikon dan tema
 
-- Gunakan **shadcn/ui** sebagai basis komponen aplikasi dan **Lucide React** untuk ikon.
-- Sediakan pilihan tema **Light / Dark / System**; System mengikuti preferensi perangkat. Label UI Indonesia: Terang / Gelap / Sistem.
-- Font Inter dan warna utama emerald `#059669` tetap berlaku. Palet yang tercantum saat ini adalah baseline Light; token Dark dan pengujian kontras diselesaikan pada fase UI.
-- Keputusan ini belum merupakan implementasi. Instalasi shadcn/ui, ikon, dan theme provider ditunda ke fase UI; tidak termasuk penutupan Phase 1.
+- **shadcn/ui adalah sistem komponen utama untuk seluruh fitur frontend.** Prioritaskan komponen resmi shadcn/ui apabila tersedia padanannya; gunakan ulang komponen lokal yang sudah ada sebelum menambah salinan baru.
+- Bangun komponen domain (misalnya form kendaraan atau pemilih tarif) dengan mengomposisi primitives shadcn/ui. Business rules, autentikasi dan otorisasi server tetap terpisah dari komponen presentasi.
+- Gunakan **Lucide React secara eksklusif untuk ikon aplikasi**. Jangan memperkenalkan library UI atau ikon lain.
+- Gunakan semantic design tokens dan variants bersama dari CSS global untuk warna, spacing, radius, typography dan interaction states. Inter dan primary `#059669` tetap berlaku; hindari palet duplikat atau warna tema hard-coded per fitur.
+- Terapkan pola mobile-first yang konsisten: container dan spacing responsif, form terbaca pada layar kecil, serta touch targets sekitar 44?48px. Pastikan label, semantik, keyboard navigation, focus-visible, error/status announcements dan kontras memadai; status tidak disampaikan hanya melalui warna.
+- Semua komponen baru mendukung **Light / Dark / System**, dengan **System sebagai default**, melalui provider next-themes existing. Label UI: **Terang / Gelap / Sistem**. System mengikuti preferensi perangkat; periksa keterbacaan serta hover/focus/disabled/loading/error dalam kedua palet.
+- Tambahkan komponen resmi secara **bertahap sesuai kebutuhan fitur aktif**, mempertahankan konfigurasi Tailwind v4/components.json dan kebijakan keamanan pnpm. Jangan memasang seluruh katalog atau library komponen alternatif.
+- Pertahankan komponen working yang sudah ada; standar ini mengarahkan fitur baru dan perubahan yang relevan tanpa mewajibkan rewrite massal. Jangan mengubah backend atau autentikasi demi standardisasi visual.
+- Foundation shadcn/ui, Lucide dan tema sudah tersedia pada P2.2B. Riwayat dan batas verifikasi otomatis/manual tetap mengacu HANDOFF.md.
 
 ### 6.1 Buttons
 
@@ -952,3 +957,14 @@ Desain MVP dianggap memenuhi spesifikasi jika:
 Prioritaskan efisiensi petugas, keterbacaan informasi, dan keamanan transaksi di atas dekorasi visual.
 
 Setiap komponen harus memiliki fungsi yang jelas.
+
+
+## P2.2B ? Login frontend source, 2026-10-26
+
+Status 2026-10-26: source dan dependency login tersedia; 16 tes interaksi/session/theme baru lulus, suite total 277 lulus, lint/typecheck/build lulus. Manual visual/browser/device QA belum dilakukan. Riwayat blocker tetap tercatat di HANDOFF.md.
+
+- Setup manual shadcn/ui Tailwind v4 mempertahankan CSS existing dan memperluas semantic tokens; components.json new-york, CSS variables, Lucide. Komponen minimum: Button, Input, Label, Card, Alert. Referensi: https://ui.shadcn.com/docs/installation/manual dan https://ui.shadcn.com/docs/tailwind-v4.
+- Inter; primary #059669; latar terang #F8FAFC, surface #FFFFFF, teks #0F172A. Primary foreground #001B13 agar label tombol kontras; dark palette melalui class .dark. next-themes System default dengan pilihan UI Sistem/Terang/Gelap dan penyimpanan preferensi tema saja. Referensi: https://ui.shadcn.com/docs/dark-mode/next.
+- /login: satu kolom mobile; panel brand dan form pada desktop. Seluruh copy Indonesia. Email/kata sandi dengan label dan autocomplete, toggle password 44px, fields/tombol submit 48px, focus-visible, error aria-describedby, status loading dan duplicate-submit guard. Tidak ada registrasi publik, OAuth, OTP atau akun demo.
+- /app merupakan placeholder autentikasi minimal: nama user sendiri, penjelasan ruang kerja belum tersedia, logout. Tidak menampilkan atau memberikan akses tenant/lokasi. Login hanya dianggap sukses sesudah konfirmasi sesi server; error menggunakan pesan tetap tanpa sensitive payload.
+- Terverifikasi otomatis: validasi/fokus/Tab, password toggle dengan Enter/Space, loading dan duplicate-submit prevention, login/logout success/failure, server route guards, real next-themes provider dengan preferensi sistem/persistensi. Tertunda: browser desktop/mobile, rendered focus/contrast/zoom/touch, hydration dan screen-reader QA. Lihat HANDOFF.md untuk hasil dan deployment prerequisites.

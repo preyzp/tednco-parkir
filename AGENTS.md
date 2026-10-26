@@ -113,8 +113,13 @@ A change is complete only when:
 
 <!-- END:nextjs-agent-rules -->
 
-## Confirmed UI decisions
+## Frontend component standard
 
-- Use shadcn/ui for application UI components and Lucide React for icons.
-- Support Light, Dark, and System theme preferences; preserve the Inter font and emerald primary color in `DESIGN_SPEC.md`.
-- These are planned UI decisions. Do not install shadcn/ui or implement themes during Phase 1 closure.
+- Use **shadcn/ui as the primary component system for all frontend features**. Prefer the official shadcn/ui component whenever an equivalent exists; reuse existing local components before adding another copy.
+- Build domain-specific components by composing shadcn/ui primitives. Keep business rules, authentication and server authorization outside presentation components.
+- Use **Lucide React exclusively for application icons**. Do not introduce another icon library or UI component library.
+- Reuse centralized semantic design tokens and component variants from DESIGN_SPEC.md and the existing global CSS. Preserve Inter and primary #059669; avoid feature-specific duplicate palettes or hard-coded theme colors.
+- Follow consistent mobile-first responsive patterns and accessible semantics: labels, keyboard operation, visible focus, error/status announcements and 44?48px touch targets. Do not communicate status through color alone.
+- Support **Light / Dark / System** across new components, with **System as default**, using the existing next-themes provider. Verify readability and interaction states in both palettes; keep visible UI text in Indonesian.
+- Add official shadcn/ui components incrementally only when an active feature needs them, preserving the existing Tailwind v4/components.json setup and pnpm security settings. Never install the entire catalog.
+- Preserve working components; apply this standard to new work and relevant changes without unnecessary rewrites. Existing backend and authentication behavior must remain intact.

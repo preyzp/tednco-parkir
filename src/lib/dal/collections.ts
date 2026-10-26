@@ -10,6 +10,7 @@ import { collectionNames } from "../collection-names";
 import {
   requireTenantContext, requireLocationContext, requirePlatformAccess,
 } from "./authorization";
+import type { AuthorizationSelection } from "./authorization";
 
 // Core collections only (DATABASE_SCHEMA.md section 3). Supporting collections
 // await their persistence types and feature scope; no implicit Document fallback.
@@ -69,9 +70,9 @@ function snapshotId(id: ObjectId): string {
   return id.toHexString();
 }
 
-export async function getTenantCollection<K extends TenantCollectionName>(name: K) {
+export async function getTenantCollection<K extends TenantCollectionName>(name: K, selection?: AuthorizationSelection) {
   checkName(name, tenantNames);
-  const context = await requireTenantContext();
+  const context = await requireTenantContext(selection);
   const tenantId = snapshotId(context.tenantId);
   const db = await getDb();
   return new ScopedCollection(db.collection<CoreDocuments[K]>(collectionNames[name]), () => (
@@ -79,9 +80,9 @@ export async function getTenantCollection<K extends TenantCollectionName>(name: 
   ) as Filter<CoreDocuments[K]>);
 }
 
-export async function getLocationCollection<K extends LocationCollectionName>(name: K) {
+export async function getLocationCollection<K extends LocationCollectionName>(name: K, selection?: AuthorizationSelection) {
   checkName(name, locationNames);
-  const context = await requireLocationContext();
+  const context = await requireLocationContext(selection);
   const tenantId = snapshotId(context.tenantId);
   const locationId = snapshotId(context.locationId);
   const db = await getDb();

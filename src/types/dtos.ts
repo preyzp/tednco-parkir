@@ -14,7 +14,7 @@ export type LocationDto = Omit<Location, "_id" | "tenantId" | "createdAt" | "upd
   _id: string; tenantId: string; createdAt: string; updatedAt: string;
 };
 
-export type UserDto = Omit<User, "_id" | "passwordHash" | "createdAt" | "updatedAt" | "lastLoginAt"> & {
+export type UserDto = Omit<User, "_id" | "createdAt" | "updatedAt" | "lastLoginAt"> & {
   _id: string; createdAt: string; updatedAt: string; lastLoginAt?: string;
 };
 

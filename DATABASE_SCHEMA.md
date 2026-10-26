@@ -210,7 +210,8 @@ interface User {
   _id: ObjectId;
   name: string;
   email: string;
-  passwordHash: string;
+  emailVerified: boolean;
+  image?: string | null;
   status: "active" | "inactive" | "locked";
   platformRole?: "platform_admin";
   createdAt: Date;
@@ -223,7 +224,7 @@ Ketentuan:
 
 - Email harus dinormalisasi sebelum penyimpanan dan pencarian.
 - Email harus unik berdasarkan kebijakan autentikasi platform.
-- `passwordHash` tidak boleh dikirim ke browser.
+- Tidak ada `passwordHash` pada kontrak user baru; hash credential hanya dikelola Better Auth di `authAccounts.password` dan tidak boleh dikirim ke browser.
 - Jangan menyimpan password asli.
 - Jangan membuat sistem hashing atau session cryptography sendiri.
 - Pengelolaan autentikasi harus mengikuti `AUTH_AND_TENANCY.md`.
@@ -234,6 +235,33 @@ Index:
 - `{ status: 1 }`
 
 Jika auth library yang dipilih memerlukan struktur pengguna atau koleksi berbeda, gunakan model yang kompatibel dan dokumentasikan pemetaannya. Jangan menduplikasi sistem autentikasi tanpa kebutuhan.
+
+### 6.1 Kontrak auth P2.1B — Better Auth 1.7.13
+
+`users` tetap satu-satunya koleksi identitas. Adapter resmi 1.7.13 menyimpan `_id` dan referenced `userId` sebagai BSON ObjectId, dan mengekspos hex string di API. Terbukti melalui adapter asli dengan DB mock: create/read/filter user reference. Tidak memakai custom ID generator atau migrasi string ID. `emailVerified` required, `image` optional/nullable; `status`, `platformRole`, `lastLoginAt` adalah additional fields server-owned. User baru default inactive; public signup dinonaktifkan. Tidak memberi membership saat login.
+
+Koleksi pendukung auth global (bukan tenant-owned, tidak diakses melalui business DAL):
+
+| Koleksi | Kontrak persistence |
+|---|---|
+| `authAccounts` | `_id: ObjectId`, `userId: ObjectId`, `accountId: string`, `providerId: string`, createdAt/updatedAt Date. Untuk email/password: providerId credential, hash scrypt hanya di password optional/nullable. Field optional library lain: accessToken, refreshToken, idToken, accessTokenExpiresAt, refreshTokenExpiresAt, scope; tidak ada OAuth provider aktif. accountId adalah provider identity string, bukan BSON foreign key. |
+| `authSessions` | `_id/userId: ObjectId`, token string, expiresAt/createdAt/updatedAt Date, optional/nullable ipAddress dan userAgent. Ini sesi login; `parkingSessions` tetap sesi parkir. |
+| `authVerifications` | `_id: ObjectId`, identifier/value string, expiresAt/createdAt/updatedAt Date. Identifier disimpan hashed lewat opsi library; reset/email belum diaktifkan. Bukan reset-token store buatan aplikasi. |
+| `authRateLimits` | `_id: ObjectId`, key string, count number, lastRequest number (epoch ms). Tidak memakai TTL Date untuk field epoch ini. |
+
+Tipe account/session/verification/rateLimit diproyeksikan dari `better-auth/types` di `src/types/auth.ts`, hanya mengganti ID persistence dengan BSON. Tidak mengekspor DTO token/hash. Tidak ada user model kedua.
+
+Index auth dikelola terpisah dari 31 index foundation melalui `authenticationIndexDefinitions()` / `setupAuthenticationIndexes()` di `src/lib/auth-indexes.ts`:
+
+- Reuse **users_email_unique** dan **users_status** existing, tanpa rename/drop.
+- authAccounts: **auth_accounts_provider_account_unique** (providerId+accountId unique), **auth_accounts_user** (userId).
+- authSessions: **auth_sessions_token_unique** (token unique), **auth_sessions_user** (userId), **auth_sessions_expiry** (expiresAt).
+- authVerifications: **auth_verifications_identifier** (identifier), **auth_verifications_expiry** (expiresAt).
+- authRateLimits: **auth_rate_limits_key_unique** (key unique).
+
+Total **10 index auth contracts** termasuk 2 users existing (8 tambahan). Core auth indexes menggunakan schema/table indexes yang sama dengan adapter; unique rate-limit key disuplai maintenance karena adapter 1.7.13 tidak otomatis membuat field-level indexes. Helper eksplisit tidak dipanggil oleh import/build/startup/route. Adapter dapat memastikan table indexes saat write pertama; nama/options sudah disamakan agar tidak menduplikasi users email. Provision seluruh indexes secara berizin sebelum melayani traffic auth, terutama unique rate-limit key. Tidak ada TTL index baru; expiry tetap ditegakkan library, lifecycle cleanup dapat direncanakan terpisah.
+
+**Tidak ada data atau index Atlas yang diubah pada P2.1B.** Ini kontrak baru, bukan migrasi record lama. Legacy users.passwordHash dan field emailVerified yang belum ada memerlukan review/migrasi terpisah sebelum existing user login diaktifkan; jangan menyalin hash atau menciptakan credential/user baru otomatis. Tidak ada klaim live enforcement atau kecocokan hash legacy dari tes mock.
 
 ---
 

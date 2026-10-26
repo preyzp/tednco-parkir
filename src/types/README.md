@@ -8,7 +8,11 @@ MongoDB import or connection is introduced.
   sections 4–14, including ObjectId references and UTC BSON Date timestamps.
 - `dtos.ts`: JSON-facing representations with hex string identifiers and UTC
   ISO 8601 timestamp strings; field names and optionality are preserved.
-  `UserDto` excludes `passwordHash`. Audit snapshots accept only JSON values.
+  User has no password field; credentials belong only to the library account
+  model. Audit snapshots accept only JSON values.
+- `auth.ts`: BSON projections of Better Auth account/session/verification/rate
+  limit types, with ObjectId primary and referenced user identifiers. No DTOs
+  exposing auth credentials or session tokens are exported.
 
 DTO declarations do not transform, redact, authorize, or validate runtime data.
 Server mapping must explicitly select safe fields: assigning a document to a
@@ -34,5 +38,6 @@ Known specification gaps (no behavior introduced here):
   specified. No direction or reversal-reference fields have been invented.
 - Refund rules allow transfer, but ledger `paymentMethod` only specifies cash,
   qris, prepaid. The documented enum is preserved pending a schema decision.
-- User persistence includes `passwordHash`; mapping may change after selection
-  of an authentication library. No hashing/authentication is implemented.
+- User persistence follows Better Auth with `emailVerified` and optional image.
+  Legacy users/password hashes require a separately reviewed migration; no
+  migration or database writes are performed by type declarations.

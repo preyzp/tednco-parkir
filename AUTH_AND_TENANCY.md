@@ -25,6 +25,45 @@ Pengguna yang berhasil login belum tentu berhak mengakses seluruh data atau fitu
 
 ---
 
+## Development provisioning maintenance (2026-10-26)
+
+Opt-in standalone CLI `scripts/provision-dev-owner.mjs` prepares one Owner/tenant/location only in dedicated `tednco_parkir_provision_dev`. Offline dry-run is the default; apply requires NODE_ENV=development, explicit enable/write-confirmation flags, secure runtime credentials, unique-index prerequisites and a MongoDB transaction. It uses official Better Auth hashPassword and the pinned adapter BSON credential schema; does not enable public signup or issue a login session. Existing users/memberships are never adopted or escalated, and the unique transaction marker prevents repeat creation. No platform_admin is provisioned. Full usage, recovery/cleanup instructions and test limits are in HANDOFF.md. No live provisioning has been executed or approved by preparing these scripts. Application session/tenant/location guards remain unchanged.
+
+## P2.3A - Authorization foundation implemented (2026-10-26)
+
+Bagian ini menggantikan pernyataan historis bahwa business DAL selalu memakai stub. Tidak ada perubahan Better Auth/session cryptography, schema persistence, provisioning atau database live.
+
+### Trusted server context
+
+`src/lib/dal/authorization.ts` adalah server-only. Setiap pemanggilan menggunakan `requireAuthenticatedSession()`, memvalidasi ID/expiry, lalu membaca ulang users (_id BSON ObjectId, status active) dengan projection _id/status/platformRole. Role tenant/permissions tidak diambil dari cookie snapshot, URL, header, form atau session payload. Database failures menjadi AppError SERVICE_UNAVAILABLE tanpa detail; missing/expired/deleted/inactive user UNAUTHENTICATED; pelanggaran scope FORBIDDEN.
+
+`AuthorizationSelection` hanya menerima optional tenantId/locationId hex strings; extra keys (termasuk role/permissions) ditolak. Selection adalah input tidak tepercaya, bukan bukti izin. Tanpa tenantId hanya tepat satu membership aktif diterima. Dengan tenantId, query userId+tenantId harus menghasilkan tepat satu membership aktif; duplicate/missing/corrupt/foreign memberships ditolak. Runtime schema memeriksa BSON IDs, role/status, locationIds unik dan permission names yang dikenal. Tenant harus active. Tidak ada implicit first tenant/location atau cross-request cache.
+
+`requireTenantContext(selection?)` hanya untuk owner, tanpa locationId, dan memberi scope tenant-wide. `requireLocationContext(selection?)` memverifikasi active location dengan tenantId dan _id/assignment. Owner dapat memakai semua lokasi aktif milik tenant; admin/staff hanya locationIds membership. Tanpa locationId harus tepat satu lokasi aktif yang diizinkan; zero/multiple results ditolak. Array assignment kosong bukan wildcard. Tidak ada selected-tenant cookie baru atau tenant switcher UI pada foundation ini.
+
+### Least-privilege policy
+
+Runtime permission policy terpusat di `src/lib/dal/permissions.ts`, memakai kontrak Permission existing. `requirePermission(name, selection?)` memuat ulang lokasi/context dan memeriksa izin; `requireTenantPermission` memakai owner-only tenant context. Jangan menerima context buatan caller sebagai bukti otorisasi.
+
+| Role | Scope | Permissions |
+|---|---|---|
+| platform_admin | Platform only dari users.platformRole terbaru | requirePlatformAccess melindungi platform DAL allowlist existing. Tidak ada implicit membership/tenant operational access. Jika punya membership eksplisit, role tenant itu dinilai terpisah. |
+| owner | Tenant membership aktif, seluruh lokasi aktif tenant | Semua permission yang dikenal pada tenant tersebut, termasuk memberships/locations/subscription management. |
+| admin | Lokasi yang ditugaskan; tidak mendapat tenant-wide handle | Default operasional minimum; sensitive grants hanya dari memberships.permissions dan admin allowlist. |
+| staff | Lokasi yang ditugaskan; tidak mendapat tenant-wide handle | Default operasional minimum; optional grants terbatas cancel/register/deposit/toggle prepaid. Refund, financial reports, balance adjustment, transaction corrections dan tenant administration tidak dapat diberikan ke staff lewat extra grants. |
+
+Default admin/staff: vehicle.create/read/update_active, parking.checkout/read_history, tariff.read, prepaid.read, reports.read_operational. Tambahan staff yang diperbolehkan: parking.cancel, prepaid.register/deposit/toggle_status. Tambahan admin: semua tambahan staff, tariff.manage, prepaid.refund/adjust_balance, reports.read_financial, transactions.correct. Permission administrasi tenant tetap owner-only. Grant dikenal tetapi melampaui ceiling role tidak diterapkan; nama permission tidak dikenal menyebabkan membership ditolak. Policy ini konservatif sampai feature-specific permission configuration disediakan; tidak mengimplementasikan transaksi/fitur bisnisnya.
+
+### DAL boundary and limits
+
+`getTenantCollection(name, selection?)` dan `getLocationCollection(name, selection?)` memanggil real guards; allowlists, BSON scope snapshot dan mandatory $and tenant/location filters tetap. Platform audit scope tetap mengecualikan tenant/location audit records. Handles masih hanya menyediakan collectionName/scopedFilter, tanpa raw Collection/Db, CRUD, pipeline atau callback. Authorization lookup internal boleh membaca users/memberships/tenants/locations melalui koneksi lazy existing; jangan mengekspos raw getter ke business code.
+
+Scope authorization bukan izin untuk arbitrary CRUD. Future repository operations harus memakai permission guard yang relevan dan scope sama, projection allowlist, recheck per request/operation; jangan menyimpan context/handle lintas request. Revocation concurrent dengan beberapa DB reads belum memiliki transaction snapshot/atomic mutation checks; financially significant mutations memerlukan feature-specific concurrency/transaction protection. Owner-only tenant handle sengaja menolak admin/staff meskipun semua lokasi saat ini ditugaskan. Platform tenant support/audited impersonation belum tersedia.
+
+Verifikasi offline: 38 authorization tests (termasuk pengganti test stub fail-closed existing), existing DAL filter tests, native auth lifecycle dan UI suite; total **314 tests / 18 files lulus**, lint/typecheck/build lulus. Tidak membuktikan live Atlas index/data integrity atau concurrency. Live provisioning/index/schema/data review dan audit infrastructure tetap prerequisite terpisah. Tidak ada route business/dashboard baru; /app tetap placeholder identitas.
+
+---
+
 ## 2. Teknologi Autentikasi
 
 Gunakan library autentikasi yang terpelihara, kompatibel dengan versi Next.js yang digunakan, dan sesuai dengan kebutuhan aplikasi.
@@ -39,7 +78,107 @@ Sebelum implementasi:
 
 Jangan mengasumsikan library tertentu sudah terpasang sebelum memeriksa `package.json` dan implementasi yang tersedia.
 
+### Keputusan P2.1 — riset/desain, 2026-10-26
+
+Snapshot riset di bawah dipertahankan; hasil implementasi terkini ada pada bagian P2.1B berikut.
+
+**Dipilih: Better Auth + official MongoDB adapter, email/password dan database-backed sessions.** Seleksi/desain selesai; instalasi/setup belum dimulai, sehingga checklist integrasi P2.1 belum complete. Scope sesi ini hanya riset dan dokumentasi, tanpa dependency, implementasi, koneksi/write Atlas, atau perubahan business logic.
+
+| Kriteria MVP | Auth.js | Better Auth |
+|---|---|---|
+| Password lifecycle | Credentials menyerahkan persistence, hashing, reset dan rate limiting ke aplikasi. | Email/password dan hashing tersedia dalam library; aplikasi tetap menyediakan layanan email dan policy. |
+| Session | Credentials hanya mendukung JWT sessions menurut API reference; adapter database tidak menghilangkan batasan itu. | Database sessions dan revocation sesuai kebutuhan logout/penonaktifan akun. |
+| Integrasi | Next.js dan MongoDB adapter tersedia; layak untuk existing Auth.js/OAuth, tetapi lebih banyak integrasi password untuk proyek ini. | App Router dan official MongoDB adapter, tanpa ORM atau crypto aplikasi sendiri. |
+| Maintenance | Tetap mendapat security patches/urgent fixes di bawah tim Better Auth. | Maintainer merekomendasikan Better Auth untuk proyek baru; dipilih karena kebutuhan MVP, bukan klaim otomatis lebih aman. |
+
+Sumber: [Auth.js Credentials](https://authjs.dev/getting-started/authentication/credentials), [batas Credentials/JWT](https://authjs.dev/reference/core/providers/credentials), [pengumuman maintenance](https://better-auth.com/blog/authjs-joins-better-auth). Kedua library tetap memerlukan authorization tenant/lokasi aplikasi.
+
+### Compatibility, dependency dan environment
+
+- Metadata npm read-only pada 2026-10-26: Better Auth stable **1.7.13**, peer Next.js `^14 || ^15 || ^16`, React/React DOM `^18 || ^19`, MongoDB `^6 || ^7`. Stack aktual Next.js **16.4.3**, React **19.3.0**, MongoDB **7.7.0**, TypeScript **5.9.3**, Node **24.11.1**. Peer ranges cocok; TypeScript/build/runtime dengan library belum diuji karena belum diinstal.
+- Auth.js npm latest **4.24.15**, beta **5.0.0-beta.32**; keduanya mencantumkan peer Next.js 16/React 19. Jangan menyamakan dokumentasi v5 dengan release stable v4. Metadata: [Better Auth](https://www.npmjs.com/package/better-auth), [Mongo adapter](https://www.npmjs.com/package/@better-auth/mongo-adapter), [next-auth](https://www.npmjs.com/package/next-auth).
+- Rencana setup: pin exact **`better-auth@1.7.13` + `@better-auth/mongo-adapter@1.7.13`**, setelah recheck patch/advisory saat implementasi. Gunakan paket adapter resmi sesuai [MongoDB guide](https://better-auth.com/docs/adapters/mongo). Reuse `mongodb`, `zod`, `server-only`; tanpa Mongoose, Prisma, Redis, bcrypt/argon2 tambahan, atau auth library kedua.
+- Env server rencana: **`BETTER_AUTH_SECRET`** (acak berentropi tinggi, minimum 32 karakter), **`BETTER_AUTH_URL`**, dan **`MONGODB_URI` / `MONGODB_DB_NAME`** existing. Tidak memakai `MONGODB_DB`/`AUTH_SECRET` provisional sebagai konfigurasi paralel. Validasi lazy melalui `src/lib/env.ts`; template diselaraskan pada setup, tanpa mengubah `.env.local`. Lihat [installation](https://better-auth.com/docs/installation).
+
+### Pemetaan satu user dan satu session store
+
+Gunakan `modelName` eksplisit untuk mencegah koleksi default `user` di samping `users`. Koleksi auth adalah identitas global, tanpa tenantId; hubungan tenant tetap hanya di `memberships`. Nama berikut adalah rencana, bukan koleksi yang sudah dibuat.
+
+| Model library → koleksi | Tanggung jawab |
+|---|---|
+| user → `users` existing | Identitas tunggal; pertahankan name/email/timestamps/status/platformRole/lastLoginAt, tambah emailVerified dan optional image. |
+| account → `authAccounts` baru | Metode login per user; hash hanya pada password dengan providerId credential. Bukan user kedua atau prepaid account. |
+| session → `authSessions` baru | Sesi login library: userId/token/expiry/metadata. Jangan menambah session atau JWT store aplikasi paralel; berbeda dari parkingSessions. |
+| verification → `authVerifications` baru | Verifikasi/reset library; tidak membuat reset-token store kedua. |
+| rateLimit → `authRateLimits` baru | Shared counters untuk database rate limiter deployment multi-instance. |
+
+Model names, additional fields dan core schema didukung [database concepts](https://better-auth.com/docs/concepts/database). **Schema perlu alignment:** `users.passwordHash` masih wajib pada `DATABASE_SCHEMA.md` dan `src/types/documents.ts`; pada setup ubah kontrak menjadi hash library-owned di `authAccounts.password`, tanpa dua sumber hash. Sesuaikan UserDto/type tests/CoreDocuments.users. Status dan platformRole server-owned (`input: false`), tidak dapat diubah lewat profile endpoints, tanpa default privilege tinggi. DTO aplikasi tidak mengekspos credential/session secrets.
+
+Pertahankan ObjectId untuk identitas/referensi domain, termasuk memberships.userId. String ID API divalidasi sebelum dikonversi. Setup wajib membuktikan representasi BSON `_id`/`userId` adapter pinned lewat round-trip tests; jangan mengasumsikan string FK sama dengan ObjectId atau mengubah seluruh referensi bisnis. Tipe auth mengikuti adapter, bukan model user/session buatan sendiri. Ini acceptance gate yang belum terverifikasi.
+
+Index rencana: gunakan ulang unique users.email/status; unique session token dan lookup userId/expiry; account providerId+accountId dan userId; verification identifier/expiry; unique rate-limit key. Final definitions mengikuti adapter pinned dan tes concurrency. TTL hanya cleanup, bukan validasi expiry. MongoDB tidak membutuhkan CLI SQL migration, tetapi docs/schema/types dan controlled index setup tetap perlu diselaraskan. Tidak auto-create index saat import/startup. Existing records/hash compatibility diperiksa melalui prosedur terpisah sebelum migrasi nyata; riset ini tidak mengasumsikan database kosong.
+
+### Session, password dan security choices
+
+- MongoDB-backed sessions; cookie library **HttpOnly**, **Secure** pada HTTPS, **SameSite Lax**. Proposal P2.4: expiry **7 hari**, refresh **1 hari**, sesuai defaults library; uji policy sebelum selesai. **Cookie cache off**, tanpa secondary storage/JWT plugin. Logout/revocation diperiksa server; role/permission tidak dipercaya dari cookie snapshot. Lihat [sessions](https://better-auth.com/docs/concepts/session-management).
+- Gunakan **scrypt bawaan library**, tanpa custom hashing/crypto. Saat P2.5 pilih `revokeSessionsOnPasswordReset: true`, reset expiry/single-use, dan identifier hashing via opsi library `verification.storeIdentifier: hashed`; buktikan dengan tes sebelum digunakan. Provider email belum dipilih: jangan mengaktifkan reset palsu. Lihat [email/password](https://better-auth.com/docs/authentication/email-password) dan [verification options](https://better-auth.com/docs/reference/options).
+- Tetapkan base URL/origin allowlist spesifik dan pertahankan CSRF/cookie protections library. Verifikasi payload get-session/client; gunakan response shaping library bila diperlukan agar token/hash tidak bocor lewat DTO/log aplikasi. Jangan mengasumsikan seluruh response library sudah sesuai kontrak aplikasi. Lihat [security](https://better-auth.com/docs/reference/security).
+- Login awal melalui HTTP handler library agar limiter berlaku; direct `auth.api` **tidak otomatis terkena rate limiting**. Pilih storage database shared; uji atomic/concurrent limits dan trusted proxy/IP sebelum deployment, tanpa memory-only untuk multi-instance. Credential Server Actions nanti wajib mendapat limit setara. Lihat [rate limiting](https://better-auth.com/docs/concepts/rate-limit).
+- Disable public email signup selama setup sampai provisioning berizin dirancang; bukan keputusan menutup onboarding owner selamanya. Tanpa organization/admin plugins: tenant, owner/admin/staff, platform_admin, locationIds dan permissions tetap milik model aplikasi. Login tidak otomatis memberi membership.
+
+### Integration points dan next implementation task
+
+**Berikutnya: P2.1 lanjutan — Better Auth Foundation Setup dan Schema Alignment.**
+
+1. Recheck versi/advisory lalu pin dependency, selaraskan DATABASE_SCHEMA, User/DTO/type tests, collection/index contracts dan env template. Buat factory auth **server-only/lazy** menggunakan existing `getDb()` dan shared `getMongoClient()`, tanpa koneksi saat import/build atau MongoClient kedua. Beri adapter client untuk transaksi Atlas. Before hooks aman terhadap retry; email/side effects setelah commit. Jangan tutup shared client per request.
+2. Mount Node handler `src/app/api/auth/[...all]/route.ts` via `toNextJsHandler`; client terpisah `src/lib/auth-client.ts` via better-auth/react bila diperlukan. Server session memakai `await headers()`. Jika Server Actions memerlukan Set-Cookie, gunakan `nextCookies()` terakhir dan rate limiting setara. Ikuti [Next.js integration](https://better-auth.com/docs/integrations/next). Session/authorization tidak boleh masuk cross-user `use cache`; proxy Next.js 16 hanya redirect awal.
+3. Business DAL tetap fail-closed: `requireTenantContext`, `requireLocationContext`, `requirePlatformAccess` belum dibuka pada setup. Auth adapter diberi akses terbatas pada global auth collections agar login tidak bergantung pada sesi yang belum ada; jangan menambahkan raw DB escape hatch ke business DAL. P2.6–P2.9 nanti memuat user aktif, membership, tenant/lokasi dan permission terbaru di server. PlatformRole terpisah dari role tenant.
+4. Reuse Zod dan AppError/pesan Indonesia pada boundary aplikasi. Route library mempertahankan protokol/cookie/header-nya; jangan membungkus response hingga Set-Cookie/CSRF rusak. Login UI P2.2, logout P2.3, session P2.4, reset/email P2.5, tenancy/security P2.6–P2.12 tetap task bertahap.
+
+Acceptance setup: satu users dan satu auth-session store, mapping ObjectId/model/credential teruji, privilege client ditolak, import/build tidak mengakses DB, unit tests/lint/typecheck/build lulus. Live adapter/index tests hanya pada database test terisolasi dengan persetujuan eksplisit. Riset ini belum membuktikan runtime/schema enforcement atau auth end-to-end.
+
 ### Prinsip implementasi
+
+#### P2.2A — Login Backend dan Session Integration (2026-10-26)
+
+Backend tetap menggunakan **Better Auth 1.7.13** dan getAuth() existing; tidak ada auth system/session store baru. Snapshot P2.1B di bawah bersifat historis; kontrak HTTP terkini adalah proyeksi aplikasi berikut, bukan raw payload native Better Auth.
+
+| Endpoint | Kontrak aplikasi |
+|---|---|
+| POST `/api/auth/sign-in/email` | Request email/password dan opsi resmi diteruskan ke handler library. Library memverifikasi password, CSRF/origin, rate limit dan menerbitkan cookie. Sukses `{ ok: true, user }`; user hanya id/name/email/emailVerified/image optional. Token, account records, password hashes, role/tenant/location claims dan redirect payload tidak dikembalikan. |
+| GET `/api/auth/get-session` | Handler resmi memvalidasi cookie dan session, termasuk refresh cookie sesuai policy. Aplikasi memeriksa ID/userId/expiry dan user terkini dengan filter BSON `_id` + `status: active`. Sukses `{ ok: true, user, session: { expiresAt } }`, expiry ISO UTC. Sesi tidak valid/hilang/expired atau user inactive/locked/deleted menghasilkan standar 401 UNAUTHENTICATED. |
+| POST `/api/auth/sign-out` | Handler resmi menghapus sesi dan cookie. Aplikasi melakukan official getSession ulang menggunakan cookie request asli dengan cookie cache/refresh disabled; sukses `{ ok: true }` hanya bila sesi tidak lagi valid. Logout tanpa sesi sudah bersifat idempotent. |
+
+Cookie Set-Cookie (termasuk refresh/deletion dan multiple cookies) dipertahankan dari library; seluruh response no-store. Error native dipetakan ke AppError/normalizeError: validation 400, unauthenticated 401, forbidden 403, RATE_LIMITED 429 dan unexpected/unavailable 503, tanpa raw message/record. Retry headers limiter dipertahankan. Endpoint native lain (misalnya list-sessions/list-accounts/sign-up/reset) belum diekspos dan mengembalikan 404; pembukaan fitur berikutnya harus eksplisit. GET login/logout bukan mutasi yang diizinkan. Future login UI harus memakai kontrak aplikasi ini; jangan mengasumsikan native client response berisi token/session record lengkap.
+
+**Logout persistence caveat versi pinned:** signOut native menangkap beberapa error database dan masih dapat mengembalikan success. Post-check authoritative di route mencegah false success: bila sesi masih valid atau pemeriksaan gagal, return 503. Cookie mungkin sudah dibersihkan oleh library walau revocation belum terkonfirmasi; client tidak boleh mengklaim server logout sukses atau melakukan retry diam-diam. Tidak ada custom token verification/deletion logic.
+
+Server helpers baru di `src/lib/auth-session.ts`:
+
+- `getCurrentSession(requestHeaders?)` memakai `await headers()` bila tidak diberi server request headers, lalu official `auth.api.getSession` dengan disableCookieCache/disableRefresh. Tanpa cookie langsung null; result valid harus cocok dengan ID/userId/expiry dan user aktif terbaru. Return hanya safe identity/expiry, bukan raw auth session. Tidak ada cache lintas request, tenant selection, membership, role, atau location grants.
+- `requireAuthenticatedSession(requestHeaders?)` menghasilkan projection yang sama atau AppError UNAUTHENTICATED; auth/database failures menjadi SERVICE_UNAVAILABLE. Hanya official APIError 401 dianggap penolakan sesi, bukan object arbitrary yang mengaku memiliki statusCode. Cookie presence sendiri bukan autentikasi.
+- Resolver server-only internal hanya menerima hasil official Better Auth; tidak boleh dipanggil dengan payload/claims browser. Header tenantId/locationId/role tidak digunakan untuk mengisi identity atau authorization. User projection dibentuk allowlist dari query user aktif, bukan seluruh dokumen user.
+- RSC helper tidak memperbarui expiry karena tidak dapat meneruskan Set-Cookie; HTTP get-session menjadi boundary refresh. Cleanup expired sessions tetap dapat dilakukan library. Jangan memasukkan hasil/credential helper ke cross-user use cache atau menganggap helper selalu read-only terhadap lifecycle sesi library.
+
+Secure/HttpOnly/SameSite cookie settings dan cache-off tetap. `disableOriginCheck: false` dan `disableCSRFCheck: false` ditetapkan eksplisit, termasuk untuk test runtime (library memiliki relaxed origin default pada NODE_ENV=test). Production limiter tetap enabled/database; login tidak dipindahkan ke direct server auth.api yang melewati limiter HTTP.
+
+Tes terisolasi mencakup real library password verification, signed cookie, session refresh, invalid credentials/email nonexistence dengan error sama, forged/expired/revoked sessions, replay setelah logout, swallowed logout failure, native/DB error sanitization, active-user checks, data allowlist, dan real DAL tetap fail-closed setelah login valid. Persistence dan akun hanya fixture mock; limiter dinonaktifkan pada instance lifecycle test untuk mengisolasi alur, bukan konfigurasi produksi. Rate-limit status/header propagation diuji terpisah; shared DB limiter concurrency/live enforcement belum dibuktikan.
+
+Tidak membuat akun, mengakses Atlas, migrasi data, login UI, atau implementasi tenant/location authorization. Provisioning/index/schema legacy dan auth environment harus diverifikasi sebelum live use. P2.2A backend selesai; P2.2 UI, kebijakan lifecycle P2.4 lengkap, P2.5 reset dan P2.6–P2.12 tenancy/security tetap bertahap. Next: **P2.2B — Login UI**, tanpa menganggap login memberi akses operasional tenant.
+
+#### P2.1B — foundation terpasang (2026-10-26)
+
+- Better Auth dan official Mongo adapter **1.7.13** dipin exact; peer Next.js 16, React 19, MongoDB 7 sesuai installed Next.js 16.4.3/React 19.3.0/driver 7.7.0. TypeScript 5.9.3 tetap. `better-auth/minimal` digunakan tanpa ORM baru yang dipakai aplikasi; paket utama membawa adapter/transitive dependencies-nya sendiri.
+- `getAuth()` pada `src/lib/auth.ts` adalah server-only lazy promise factory: validasi env auth, reuse `getDb()`/`getMongoClient()`, initialize library dan await context hanya saat dipanggil, reuse sukses/pending, reset kegagalan untuk retry. Tidak membuka koneksi/index pada import/build. Error init dan route tidak mencetak raw driver error/secret; library logging dan telemetry disabled. Shared client tidak ditutup oleh auth.
+- Node catch-all `src/app/api/auth/[...all]/route.ts` meneruskan GET/POST dan mempertahankan response/cookie library; failure tak tertangani menghasilkan fixed 503 Indonesia. Runtime memakai default Node, tanpa explicit runtime export yang tidak kompatibel dengan Cache Components existing. Tidak ada login UI, auth client, Server Actions credential, atau tenant/location permission implementation.
+- Email/password enabled, scrypt library default tanpa override, public signup disabled, account linking disabled; belum ada provisioning atau password reset email provider. Hook session creation menolak ID tidak valid dan user yang tidak aktif (filter BSON _id/status di server). Pemeriksaan status pada setiap operasi sensitif tetap tanggung jawab secure session/DAL fase berikutnya, bukan klaim diselesaikan oleh hook ini.
+- Session database, cookie cache off, expiry 7 hari/updateAge 1 hari. Cookie HttpOnly/SameSite Lax/Path /, Secure pada HTTPS. `getAuthEnv()` wajib secret minimal 32 karakter tanpa whitespace tepi dan origin eksplisit tanpa userinfo/path/query/hash; produksi hanya HTTPS, HTTP hanya loopback di luar produksi. `.env.example` canonical baru; `env.example` lama diselaraskan. `getServerEnv()` database tetap independen dari auth secret. `.env.local` tidak diubah.
+- Satu users existing, hash hanya pada authAccounts.password; emailVerified/image ditambahkan pada kontrak tipe. `src/types/auth.ts` memakai tipe library dengan BSON projection, bukan auth model paralel. Adapter asli dengan DB mock membuktikan ObjectId primary/reference/query round-trip. Tidak ada migrasi ID atau data; existing record/hash compatibility belum diverifikasi.
+- `auth-schema.ts` memusatkan model names/additional fields/table indexes. Field status/platformRole/lastLoginAt client input ditolak/diabaikan sesuai parser library, tidak dikembalikan pada user profile response. Koleksi baru kontrak: authAccounts/authSessions/authVerifications/authRateLimits. Rincian schema/index di DATABASE_SCHEMA bagian 6.1; 10 index contracts termasuk 2 users existing.
+- Adapter 1.7.13 otomatis memastikan **table indexes** saat write pertama, bukan semua field indexes. Helper maintenance auth menurunkan definitions dari schema library dan menambahkan unique rate-limit key yang wajib diprovision eksplisit sebelum traffic. Helper tidak dijalankan dalam task ini; index enforcement/concurrency live belum dibuktikan. Rate limiter database enabled termasuk development, tanpa custom storage atau bypass; trusted proxy/IP dan multi-instance behavior masih perlu verifikasi deployment.
+- Business DAL authorization tetap fail-closed, tidak dimodifikasi. Tidak ada role tenant/plugin organization/admin baru. Auth global adapter terpisah dari business DAL dan tidak menambahkan raw access escape hatch. Library API mempertahankan payload/protokol normalnya, termasuk token pada beberapa native auth responses; aplikasi tidak membuat DTO credential. Pembatasan response client/session yang diperlukan harus diverifikasi pada P2.2/P2.4, jangan mengekspor seluruh auth session ke UI.
+- Instalasi pnpm selesai menautkan paket tetapi exit 1 dengan blocked existing unrs-resolver@1.12.2. Tidak approve/rebuild script. File baru minimumReleaseAgeExclude yang dibuat pnpm dihapus agar tidak menjadi kebijakan permanen. Peringatan ESLint deprecated existing tetap; tidak upgrade unrelated dependencies.
+- Next: **P2.2 — Implementasi login**, didahului pemeriksaan provisioning/index/schema existing sebelum live use. P2.3 logout, P2.4 status/session refresh/revocation/response filtering, P2.5 reset/email dan P2.6–P2.12 tenancy/security tetap terpisah. Tidak ada klaim Phase 2 complete atau readiness production.
 
 - Gunakan password hashing yang direkomendasikan library atau standar keamanan yang sesuai.
 - Jangan menyimpan password dalam bentuk asli.
@@ -530,7 +669,7 @@ Simpan kredensial dan secret di environment variable atau secret manager yang se
 Contoh konfigurasi yang mungkin dibutuhkan:
 
 - `MONGODB_URI`
-- `MONGODB_DB`
+- `MONGODB_DB_NAME`
 - Secret yang dibutuhkan library autentikasi.
 - Konfigurasi URL aplikasi.
 - Kredensial email jika layanan reset password digunakan.

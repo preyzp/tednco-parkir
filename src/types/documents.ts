@@ -36,8 +36,8 @@ export interface User {
   _id: ObjectId;
   name: string;
   email: string;
-  /** Persistence only; never expose in a DTO. Auth library mapping is pending. */
-  passwordHash: string;
+  emailVerified: boolean;
+  image?: string | null;
   status: UserStatus;
   platformRole?: PlatformRole;
   createdAt: Date;

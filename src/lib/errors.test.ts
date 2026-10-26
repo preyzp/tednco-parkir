@@ -8,7 +8,7 @@ import { AppError, normalizeError, type ErrorCode, type FieldIssue } from "./err
 test.each<[ErrorCode, number]>([
   ["VALIDATION_ERROR", 400], ["UNAUTHENTICATED", 401], ["FORBIDDEN", 403],
   ["RESOURCE_NOT_FOUND", 404], ["CONFLICT", 409], ["BUSINESS_RULE_VIOLATION", 422],
-  ["SERVICE_UNAVAILABLE", 503], ["INTERNAL_ERROR", 500],
+  ["SERVICE_UNAVAILABLE", 503], ["INTERNAL_ERROR", 500], ["RATE_LIMITED", 429],
 ])("normalizes %s with HTTP %i and a fixed Indonesian message", (code, status) => {
   const error = new AppError(code);
   expect(error).toBeInstanceOf(Error);

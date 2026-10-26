@@ -3,6 +3,7 @@ import "server-only";
 const errorCatalog = {
   VALIDATION_ERROR: { status: 400, message: "Data yang diberikan tidak valid. Periksa kembali isian Anda." },
   UNAUTHENTICATED: { status: 401, message: "Silakan masuk untuk melanjutkan." },
+  RATE_LIMITED: { status: 429, message: "Terlalu banyak percobaan. Silakan coba lagi nanti." },
   FORBIDDEN: { status: 403, message: "Anda tidak memiliki izin untuk melakukan tindakan ini." },
   RESOURCE_NOT_FOUND: { status: 404, message: "Data tidak ditemukan." },
   CONFLICT: { status: 409, message: "Data bertentangan dengan kondisi saat ini. Periksa status operasi sebelum mengulangi." },

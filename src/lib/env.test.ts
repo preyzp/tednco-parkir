@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 // Next.js enforces this boundary; Vitest runs outside its server runtime.
 vi.mock("server-only", () => ({}));
 
-import { getServerEnv } from "./env";
+import { getAuthEnv, getServerEnv } from "./env";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -13,6 +13,32 @@ function setValidEnv() {
   vi.stubEnv("MONGODB_URI", "mongodb+srv://user:synthetic-password@cluster.example.test/");
   vi.stubEnv("MONGODB_DB_NAME", "tednco_parkir_test");
 }
+
+test.each([undefined, "short", " ".repeat(40)])("auth secret is required and invalid values are not echoed (%#)", (value) => {
+  vi.stubEnv("BETTER_AUTH_SECRET", value);
+  vi.stubEnv("BETTER_AUTH_URL", "https://parkir.example.test");
+  expect(() => getAuthEnv()).toThrow("BETTER_AUTH_SECRET");
+});
+
+test.each(["invalid", "https://synthetic:secret@example.test", "https://example.test/path", "https://example.test/?secret=1", "https://example.test/#secret", "http://remote.example.test"]) ("auth URL rejects unsafe origins without exposing values (%#)", (url) => {
+  vi.stubEnv("BETTER_AUTH_SECRET", "synthetic-test-secret-01234567890123456789");
+  vi.stubEnv("BETTER_AUTH_URL", url);
+  expect(() => getAuthEnv()).toThrow(/^Invalid authentication environment: BETTER_AUTH_URL\. See \.env\.example\.$/);
+});
+
+test("auth HTTP is loopback-only outside production, while database validation remains independent", () => {
+  vi.stubEnv("BETTER_AUTH_SECRET", "synthetic-test-secret-01234567890123456789");
+  vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
+  vi.stubEnv("NODE_ENV", "test");
+  expect(getAuthEnv().BETTER_AUTH_URL).toBe("http://localhost:3000");
+  vi.stubEnv("NODE_ENV", "production");
+  expect(() => getAuthEnv()).toThrow("BETTER_AUTH_URL");
+  vi.stubEnv("BETTER_AUTH_URL", "https://parkir.example.test/");
+  expect(getAuthEnv().BETTER_AUTH_URL).toBe("https://parkir.example.test");
+  vi.stubEnv("BETTER_AUTH_SECRET", undefined);
+  setValidEnv();
+  expect(getServerEnv().MONGODB_DB_NAME).toBe("tednco_parkir_test");
+});
 
 test.each([
   "mongodb://localhost:27017",

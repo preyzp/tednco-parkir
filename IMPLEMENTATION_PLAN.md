@@ -174,9 +174,9 @@ database, not development/production. See HANDOFF.md for evidence and limits.
 
 #### Tasks
 
-- [ ] P2.1 — Integrasi authentication library.
-- [ ] P2.2 — Implementasi login.
-- [ ] P2.3 — Implementasi logout.
+- [x] P2.1 — Integrasi authentication library (P2.1A seleksi + P2.1B foundation/schema alignment; verifikasi offline, tanpa live migration).
+- [ ] P2.2 — Implementasi login (P2.2A backend/session integration selesai offline; UI P2.2B belum).
+- [ ] P2.3 — Implementasi logout (backend sign-out/revocation check tersedia dari P2.2A; flow UI sudah diuji pada P2.2B; lifecycle acceptance lengkap tetap perlu review).
 - [ ] P2.4 — Implementasi secure session handling.
 - [ ] P2.5 — Implementasi password reset.
 - [ ] P2.6 — Implementasi users dan tenant memberships.

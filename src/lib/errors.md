@@ -7,12 +7,18 @@ No endpoints, actions, logging framework or automatic retry are installed.
 | --- | --- |
 | VALIDATION_ERROR | 400 |
 | UNAUTHENTICATED | 401 |
+| RATE_LIMITED | 429 |
 | FORBIDDEN | 403 |
 | RESOURCE_NOT_FOUND | 404 |
 | CONFLICT | 409 |
 | BUSINESS_RULE_VIOLATION | 422 |
 | SERVICE_UNAVAILABLE | 503 |
 | INTERNAL_ERROR | 500 |
+
+P2.2A auth routes map native rate-limit responses to RATE_LIMITED and retain
+retry headers. Invalid/missing auth sessions use UNAUTHENTICATED; unexpected
+auth/database availability failures use SERVICE_UNAVAILABLE. Native messages,
+tokens and sensitive records are never forwarded in application error bodies.
 
 `new AppError(code)` represents a known application failure. All client messages
 come from a fixed Indonesian catalog. No custom message/cause option is provided:

@@ -1,0 +1,16 @@
+# Temporary: remove after 2026-10-26T15:35:50.564Z and verify installation again.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeExclude:
+  - better-auth@1.7.13
+  - '@better-auth/core@1.7.13'
+  - '@better-auth/drizzle-adapter@1.7.13'
+  - '@better-auth/kysely-adapter@1.7.13'
+  - '@better-auth/memory-adapter@1.7.13'
+  - '@better-auth/mongo-adapter@1.7.13'
+  - '@better-auth/prisma-adapter@1.7.13'
+  - '@better-auth/telemetry@1.7.13'
+
+# Reviewed denial: use the packaged native binding; never run this postinstall.
+allowBuilds:
+  'unrs-resolver@1.12.2': false
