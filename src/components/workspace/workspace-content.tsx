@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeftRight, MapPin } from "lucide-react";
 import { AppError } from "../../lib/errors";
-import { LOGIN_PATH, SELECT_WORKSPACE_PATH } from "../../lib/login";
+import { LOGIN_PATH, PLATFORM_PATH, SELECT_WORKSPACE_PATH } from "../../lib/login";
 import { resolveActiveWorkspace, type WorkspaceState } from "../../lib/workspace";
 import { roleLabel } from "../../lib/workspace-labels";
 import { LogoutButton } from "../auth/logout-button";
@@ -24,6 +24,8 @@ async function loadWorkspace(): Promise<WorkspaceState | null> {
 export async function WorkspaceHome() {
   const state = await loadWorkspace();
   if (!state) return <WorkspaceUnavailable />;
+  // platform_admin without an explicit membership has no tenant access here.
+  if (state.status === "empty" && state.platformAdmin) redirect(PLATFORM_PATH);
   if (state.status === "empty") return <WorkspaceEmpty />;
   if (state.status === "forbidden") return <WorkspaceForbidden />;
   if (state.status === "selection_required") redirect(SELECT_WORKSPACE_PATH);
@@ -52,6 +54,7 @@ export async function WorkspaceHome() {
 export async function WorkspacePicker() {
   const state = await loadWorkspace();
   if (!state) return <WorkspaceUnavailable />;
+  if (state.status === "empty" && state.platformAdmin) redirect(PLATFORM_PATH);
   if (state.status === "empty") return <WorkspaceEmpty />;
   // Only display strings cross to the client; the trusted context stays here.
   return (

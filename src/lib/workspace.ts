@@ -1,7 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { AppError } from "./errors";
-import { listAuthorizedWorkspaces, requireLocationContext, type AuthorizedWorkspace, type LocationContext } from "./dal";
+import { hasPlatformAccess, listAuthorizedWorkspaces, requireLocationContext, type AuthorizedWorkspace, type LocationContext } from "./dal";
 import type { TenantRole } from "../types";
 
 // Remembers the last chosen location only. It is untrusted selection input:
@@ -18,7 +18,8 @@ export interface ActiveWorkspace {
   readonly role: TenantRole;
 }
 export type WorkspaceState =
-  | { readonly status: "empty" }
+  // platformAdmin only decides where to send the user; it grants no tenant access.
+  | { readonly status: "empty"; readonly platformAdmin: boolean }
   | { readonly status: "selection_required"; readonly workspaces: readonly AuthorizedWorkspace[] }
   | { readonly status: "forbidden"; readonly workspaces: readonly AuthorizedWorkspace[] }
   | { readonly status: "active"; readonly workspace: ActiveWorkspace; readonly context: LocationContext; readonly canSwitch: boolean; readonly workspaces: readonly AuthorizedWorkspace[] };
@@ -49,7 +50,7 @@ export const workspaceCookieOptions = {
 export async function resolveActiveWorkspace(): Promise<WorkspaceState> {
   const { userId, workspaces } = await listAuthorizedWorkspaces();
   const options = workspaces.flatMap((workspace) => workspace.locations.map((location) => ({ workspace, location })));
-  if (options.length === 0) return { status: "empty" };
+  if (options.length === 0) return { status: "empty", platformAdmin: await hasPlatformAccess() };
   const stored = decodeWorkspaceSelection((await cookies()).get(WORKSPACE_COOKIE)?.value);
   // A selection remembered for another account on this browser is ignored.
   const selection = stored && stored.userId === userId.toLowerCase() ? stored : undefined;

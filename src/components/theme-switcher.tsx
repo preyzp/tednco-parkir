@@ -2,21 +2,47 @@
 
 import { useSyncExternalStore } from "react";
 import { useTheme } from "next-themes";
-import { Monitor } from "lucide-react";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { Button } from "./ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup,
+  DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
+const options = [
+  { value: "light", label: "Terang", icon: Sun },
+  { value: "dark", label: "Gelap", icon: Moon },
+  { value: "system", label: "Sistem", icon: Monitor },
+] as const;
 const subscribe = () => () => {};
+
 export function ThemeSwitcher() {
   const mounted = useSyncExternalStore(subscribe, () => true, () => false);
   const { theme, setTheme } = useTheme();
+  // Server and first client render both show "Sistem": the stored preference is
+  // only known after mount, so this avoids a hydration mismatch.
+  const current = options.find((option) => option.value === (mounted ? theme : "system")) ?? options[2];
+  const Icon = current.icon;
   return (
-    <label className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm text-muted-foreground">
-      <Monitor className="size-4" aria-hidden="true" />
-      <span className="sr-only">Tema tampilan</span>
-      <select aria-label="Tema tampilan" className="min-h-11 max-w-28 rounded bg-card text-foreground outline-offset-4 focus-visible:outline-2 focus-visible:outline-ring" value={mounted ? theme ?? "system" : "system"} onChange={(event) => setTheme(event.target.value)}>
-        <option value="system">Sistem</option>
-        <option value="light">Terang</option>
-        <option value="dark">Gelap</option>
-      </select>
-    </label>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" className="h-11 gap-2 px-3" aria-label={`Tema tampilan: ${current.label}`}>
+          <Icon aria-hidden="true" />
+          <span>{current.label}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuLabel>Tema tampilan</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={current.value} onValueChange={setTheme}>
+          {options.map(({ value, label, icon: OptionIcon }) => (
+            <DropdownMenuRadioItem key={value} value={value} className="min-h-11">
+              <OptionIcon aria-hidden="true" />
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

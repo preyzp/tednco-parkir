@@ -189,6 +189,16 @@ database, not development/production. See HANDOFF.md for evidence and limits.
 
 Live verification 2026-10-26 (Gate C, uji manual operator di browser pada database terisolasi `tednco_parkir_provision_dev`): login Owner, tenant scope, location selection, theme Light/Dark/System dan logout PASS; tidak ada sesi tertinggal setelah logout. Admin/Staff/platform_admin dan multi-tenant belum diuji live. Lihat HANDOFF.md.
 
+P3.1A — Platform Admin Foundation (label dari operator; berbeda dari P3.1 "design tokens" di Phase 3), 2026-10-26: [x] implementasi offline — bootstrap CLI platform_admin pertama (dry-run default, --apply dengan konfirmasi `BOOTSTRAP_PLATFORM_ADMIN`), route `/platform` dengan guard server `requirePlatformAccess`, landing platform_admin → `/platform`, tanpa akses tenant implisit. [ ] bootstrap live dan uji browser menunggu persetujuan. Lihat HANDOFF.md.
+
+P3.2 — Platform Admin Dashboard + Theme Switcher (label operator), 2026-10-26: [x] implementasi offline — ThemeSwitcher shadcn DropdownMenu (Terang/Gelap/Sistem) di semua area; `/platform` ringkasan (Total/Aktif/Nonaktif Tenant, Total Lokasi, tenant terbaru) dan `/platform/tenants` (cari nama, filter status, pagination server-side) dari MongoDB lewat repository read-only guard-first. [ ] uji browser dengan data nyata menunggu operator. Tanpa tambah/edit/hapus tenant.
+
+P3.3 — Create Tenant + Owner (label operator), 2026-10-26: [x] implementasi offline — `/platform/tenants/new` (form shadcn), Server Action → `createTenantWithOwner` (guard `requirePlatformActor`, validasi Zod server, normalisasi, cek slug/email) membuat tenant + lokasi pertama + Owner + credential Better Auth + membership Owner + audit log dalam satu transaksi; `/platform/tenants/[tenantId]` detail + status Owner. [ ] create tenant pertama dari UI menunggu review operator.
+
+P3.4 — Tenant Management: Edit Nama + Ubah Status (label operator), 2026-10-26: [x] implementasi offline — Dialog ubah nama (slug/Owner tetap), AlertDialog ubah status dengan peringatan dampak (Aktif ↔ Ditangguhkan, → Diarsipkan, Diarsipkan → Aktif hanya via "Pulihkan dari arsip"); transaksi update bersyarat + audit before/after; penegakan status di server per request (sesi aktif langsung terblokir) dibuktikan regression test. [ ] uji perubahan status sungguhan menunggu izin operator.
+
+P3.4B — Extended Tenant Management (label operator), 2026-10-26: [x] implementasi offline — detail tenant 4 bagian (Informasi Usaha, Akun Owner, Lokasi Parkir, Status Tenant); edit nama Owner; ubah email Owner **dinonaktifkan** (belum ada infrastruktur verifikasi email); tidak ada edit password; tambah lokasi, edit nama/alamat lokasi, aktif/nonaktif lokasi dengan AlertDialog; semua mutasi platform_admin + Zod + transaksi bersyarat + audit atomik; penegakan status lokasi untuk sesi aktif dibuktikan regression test. Verifikasi read-only 2026-10-26: konsistensi/isolasi 14/14 dan audit 9/9 PASS pada data uji. [x] manual testing P3.4B PASS dikonfirmasi operator (termasuk rename Owner, reaktivasi lokasi, arsip/pulihkan tenant dan kasus negatif). Checkpoint P3.1A–P3.4B: `feat(platform): complete tenant administration and management`.
+
 #### Role Support
 
 - Platform Admin.

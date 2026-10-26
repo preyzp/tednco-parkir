@@ -3,6 +3,7 @@ import { z } from "zod";
 export const LOGIN_PATH = "/login";
 export const AUTHENTICATED_PATH = "/app";
 export const SELECT_WORKSPACE_PATH = "/app/pilih-lokasi";
+export const PLATFORM_PATH = "/platform";
 
 export const loginSchema = z.object({
   email: z.string().trim().min(1, "Masukkan alamat email Anda.").pipe(z.email({ error: "Masukkan alamat email yang valid." })),

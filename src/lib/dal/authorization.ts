@@ -122,6 +122,21 @@ export async function listAuthorizedWorkspaces(): Promise<{ userId: string; work
 export async function requirePlatformAccess(): Promise<void> {
   return boundary(async () => { const { user } = await identity(); if (user.platformRole !== "platform_admin") deny(); });
 }
+// Same check as requirePlatformAccess, returning the verified actor for audit
+// records of platform mutations. Never accept an actor id from the caller.
+export async function requirePlatformActor(): Promise<{ readonly userId: ObjectId }> {
+  return boundary(async () => {
+    const { user, userId } = await identity();
+    if (user.platformRole !== "platform_admin") deny();
+    return Object.freeze({ userId: new ObjectId(userId) });
+  });
+}
+// Landing decision only (fresh users.platformRole). Grants nothing by itself:
+// /platform still calls requirePlatformAccess and tenant data stays behind
+// membership guards.
+export async function hasPlatformAccess(): Promise<boolean> {
+  return boundary(async () => (await identity()).user.platformRole === "platform_admin");
+}
 export async function requirePermission(permission: Permission, selection: AuthorizationSelection = {}): Promise<LocationContext> {
   if (!(permissions as readonly string[]).includes(permission)) deny();
   const context = await requireLocationContext(selection);

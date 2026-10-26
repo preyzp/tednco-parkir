@@ -27,10 +27,15 @@ it.each([[WorkspaceHome], [WorkspacePicker]])("renders a safe unavailable state 
   expect(markup).not.toContain("synthetic");
 });
 it.each([[WorkspaceHome], [WorkspacePicker]])("renders the empty access state with logout (%#)", async (component) => {
-  mocks.resolve.mockResolvedValue({ status: "empty" });
+  mocks.resolve.mockResolvedValue({ status: "empty", platformAdmin: false });
   const markup = await html(component);
   expect(markup).toContain("Belum ada akses lokasi");
   expect(markup).toContain("[Keluar]");
+});
+it.each([[WorkspaceHome], [WorkspacePicker]])("sends a platform_admin without memberships to /platform instead of tenant UI (%#)", async (component) => {
+  mocks.resolve.mockResolvedValue({ status: "empty", platformAdmin: true });
+  await expect(component()).rejects.toThrow("redirect:/platform");
+  expect(mocks.picker).not.toHaveBeenCalled();
 });
 it("home shows a forbidden state with a way to choose again", async () => {
   mocks.resolve.mockResolvedValue({ status: "forbidden", workspaces });

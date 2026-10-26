@@ -7,6 +7,9 @@
   --foreground: #0f172a;
   --card: #ffffff;
   --card-foreground: #0f172a;
+  /* Floating surfaces (menus) reuse the card palette in both themes. */
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
   --primary: #059669;
   --primary-foreground: #001b13;
   --secondary: #e2e8f0;
@@ -27,6 +30,8 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -52,6 +57,8 @@
   --foreground: #f1f5f9;
   --card: #111c2f;
   --card-foreground: #f1f5f9;
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
   --secondary: #263449;
   --secondary-foreground: #f1f5f9;
   --muted: #1e293b;

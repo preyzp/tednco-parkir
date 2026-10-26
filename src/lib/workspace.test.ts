@@ -2,9 +2,9 @@ import { ObjectId } from "mongodb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AppError } from "./errors";
-const mocks = vi.hoisted(() => ({ list: vi.fn(), guard: vi.fn(), get: vi.fn(), set: vi.fn(), redirect: vi.fn((path: string) => { throw new Error("redirect:" + path); }) }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), guard: vi.fn(), platform: vi.fn(), get: vi.fn(), set: vi.fn(), redirect: vi.fn((path: string) => { throw new Error("redirect:" + path); }) }));
 vi.mock("server-only", () => ({}));
-vi.mock("./dal", () => ({ listAuthorizedWorkspaces: mocks.list, requireLocationContext: mocks.guard }));
+vi.mock("./dal", () => ({ listAuthorizedWorkspaces: mocks.list, requireLocationContext: mocks.guard, hasPlatformAccess: mocks.platform }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.get, set: mocks.set }) }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
 import { WORKSPACE_COOKIE, resolveActiveWorkspace } from "./workspace";
@@ -26,8 +26,21 @@ beforeEach(() => {
 describe("active workspace resolution", () => {
   it("reports empty access without reading a selection", async () => {
     mocks.list.mockResolvedValue({ userId: hex(user), workspaces: [] });
-    expect(await resolveActiveWorkspace()).toEqual({ status: "empty" });
+    mocks.platform.mockResolvedValue(false);
+    expect(await resolveActiveWorkspace()).toEqual({ status: "empty", platformAdmin: false });
     expect(mocks.guard).not.toHaveBeenCalled();
+  });
+  it("flags a platform_admin without memberships for redirect, never as a workspace", async () => {
+    mocks.list.mockResolvedValue({ userId: hex(user), workspaces: [] });
+    mocks.platform.mockResolvedValue(true);
+    remembered(user, west);
+    expect(await resolveActiveWorkspace()).toEqual({ status: "empty", platformAdmin: true });
+    expect(mocks.guard).not.toHaveBeenCalled();
+  });
+  it("does not query platform role when the user has tenant workspaces", async () => {
+    remembered(user, west);
+    await resolveActiveWorkspace();
+    expect(mocks.platform).not.toHaveBeenCalled();
   });
   it("auto-selects a single authorized location after the authoritative guard", async () => {
     mocks.list.mockResolvedValue({ userId: hex(user), workspaces: [workspace([north])] });
@@ -94,7 +107,7 @@ describe("select workspace Server Action", () => {
 
 describe("optimistic route proxy", () => {
   const request = (path: string, cookie?: string) => new NextRequest(`https://parkir.example.test${path}`, { headers: cookie ? { cookie } : {} });
-  it.each(["/app", "/app/pilih-lokasi", "/app/fitur-masa-depan"])("redirects %s without a session cookie to login", (path) => {
+  it.each(["/app", "/app/pilih-lokasi", "/app/fitur-masa-depan", "/platform", "/platform/tenant"])("redirects %s without a session cookie to login", (path) => {
     const response = proxy(request(path));
     expect(response.status).toBe(307);
     expect(new URL(response.headers.get("location")!).pathname).toBe("/login");
@@ -103,6 +116,6 @@ describe("optimistic route proxy", () => {
     expect(proxy(request("/app", cookie)).headers.get("x-middleware-next")).toBe("1");
   });
   it("is scoped to the application segment only", () => {
-    expect(config.matcher).toEqual(["/app/:path*"]);
+    expect(config.matcher).toEqual(["/app/:path*", "/platform/:path*"]);
   });
 });

@@ -74,6 +74,12 @@ Menggantikan catatan P2.3A bahwa belum ada selected-tenant cookie/switcher.
 - **Pilihan lokasi** disimpan di cookie `tednco_workspace` = `userId.tenantId.locationId` (HttpOnly, SameSite=Lax, Secure di production, path `/`, 30 hari). Cookie hanya input pilihan tidak tepercaya: selalu divalidasi ulang; milik user lain diabaikan; tidak cocok lagi → forbidden. Cookie hanya ditulis oleh Server Action `selectWorkspace` setelah `requireLocationContext` sukses. Satu opsi → otomatis tanpa cookie; banyak opsi tanpa pilihan → `/app/pilih-lokasi`.
 - Batasan: cookie tidak dihapus saat logout (aman karena terikat userId dan divalidasi ulang); belum ada audit log pergantian lokasi; konteks tidak di-cache lintas request.
 
+## P3.1A - Platform Admin foundation (2026-10-26)
+
+- `/platform` (proxy matcher `/platform/:path*` optimistis) dirender di Suspense dan memanggil `requirePlatformAccess()` setiap request: fresh `users.platformRole === "platform_admin"` + user active. UNAUTHENTICATED → `/login`; FORBIDDEN → state "Akses Platform Admin ditolak"; error → unavailable. Membership tenant (Owner/Admin/Staff) tidak pernah memberi akses `/platform`; nilai platformRole tidak dikenal fail-closed.
+- `/platform` tidak memberi data tenant. platform_admin tanpa membership mendapat `listAuthorizedWorkspaces()` kosong; `resolveActiveWorkspace()` lalu memeriksa `hasPlatformAccess()` (hanya pada state empty) dan `/app` serta `/app/pilih-lokasi` redirect ke `/platform`. Form login tetap menuju `/app`, sehingga landing diputuskan di server; Owner tidak terdampak. platform_admin dengan membership eksplisit dinilai hanya sesuai role membership itu di `/app`.
+- Bootstrap development-only `scripts/bootstrap-platform-admin.mjs` (core `platform-admin-core.mjs`): DB `tednco_parkir_provision_dev`, opt-in development, konfirmasi terpisah `BOOTSTRAP_PLATFORM_ADMIN`, satu transaksi snapshot/majority menulis marker `…002`, user `platformRole: "platform_admin"` dan credential Better Auth (`hashPassword`, `accountId = userId hex`). Menolak email existing (case-insensitive), platform_admin kedua, marker existing, credential key existing; tidak pernah update/promote akun. Tidak membuat tenant/membership. Belum ada audit log aksi platform; impersonation/tenant support tetap belum tersedia.
+
 ## 2. Teknologi Autentikasi
 
 Gunakan library autentikasi yang terpelihara, kompatibel dengan versi Next.js yang digunakan, dan sesuai dengan kebutuhan aplikasi.

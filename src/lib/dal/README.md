@@ -6,6 +6,14 @@ are typed in `collections.ts`, with names shared in `../collection-names.ts`.
 `getDb()` is called lazily after
 authorization; acquiring a collection handle does not create collections/indexes.
 
+## Platform tenant directory (P3.2)
+
+`platform-tenants.ts` is the first narrow read-only repository: `getPlatformOverview()`
+and `listPlatformTenants(query)` call `requirePlatformAccess()` before any query,
+read only `tenants` (projection `_id,name,status,createdAt`) and per-tenant
+`locations` counts, and return string/number DTOs. No operational collections,
+no writes. Add future platform reads here with the same guard-first shape.
+
 ## Scope boundaries
 
 - `getTenantCollection`: tenants (matched by `_id`), locations, memberships,

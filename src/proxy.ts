@@ -10,4 +10,4 @@ export function proxy(request: NextRequest) {
   return NextResponse.redirect(new URL(LOGIN_PATH, request.url));
 }
 
-export const config = { matcher: ["/app/:path*"] };
+export const config = { matcher: ["/app/:path*", "/platform/:path*"] };

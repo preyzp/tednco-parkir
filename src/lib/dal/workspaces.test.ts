@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("../auth-session", () => ({ requireAuthenticatedSession: mocks.session }));
 vi.mock("../mongodb", () => ({ getDb: mocks.db }));
-import { listAuthorizedWorkspaces, requireLocationContext } from "./authorization";
+import { hasPlatformAccess, listAuthorizedWorkspaces, requireLocationContext, requirePlatformAccess, requireTenantContext } from "./authorization";
+import { getLocationCollection, getTenantCollection } from "./collections";
 
 // Minimal filter-aware fake: equality, ObjectId equality and $in. Queries that
 // forget tenant/assignment scoping therefore return foreign rows and fail tests.
@@ -95,6 +96,86 @@ describe("authorized workspace options", () => {
     signIn(ids.owner);
     mocks.db.mockRejectedValue(new Error("synthetic secret connection"));
     await expect(listAuthorizedWorkspaces()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE", message: expect.not.stringContaining("synthetic") });
+  });
+});
+
+describe("tenant status is enforced on every request of an active session", () => {
+  const setStatus = (status: string) => { (data.tenants.find((row) => (row._id as ObjectId).equals(ids.t1)) as Row).status = status; };
+  it.each(["suspended", "archived"])("%s immediately blocks Owner and Staff with an unchanged session, then reactivation restores access", async (status) => {
+    for (const role of ["owner", "staff"] as const) {
+      signIn(ids[role]);
+      await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).resolves.toBeTruthy();
+      setStatus(status);
+      // Same session cookie/identity; only the tenant document changed.
+      expect((await listAuthorizedWorkspaces()).workspaces.map((workspace) => workspace.tenantId)).not.toContain(hex(ids.t1));
+      await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(requireLocationContext()).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(getLocationCollection("parkingSessions", { tenantId: hex(ids.t1), locationId: hex(ids.l1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      if (role === "owner") {
+        await expect(requireTenantContext({ tenantId: hex(ids.t1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+        await expect(getTenantCollection("vehicles", { tenantId: hex(ids.t1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      }
+      setStatus("active");
+      await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).resolves.toBeTruthy();
+    }
+  });
+  it("suspending one tenant does not affect another tenant or platform administration", async () => {
+    data.memberships.push(member(ids.owner, ids.t2, "owner"));
+    setStatus("suspended");
+    signIn(ids.owner);
+    expect((await listAuthorizedWorkspaces()).workspaces.map((workspace) => workspace.tenantId)).toEqual([hex(ids.t2)]);
+    await expect(requireLocationContext({ tenantId: hex(ids.t2), locationId: hex(ids.l3) })).resolves.toBeTruthy();
+    signIn(ids.platform);
+    await expect(requirePlatformAccess()).resolves.toBeUndefined();
+  });
+});
+
+describe("location status is enforced on every request of an active session", () => {
+  const setLocation = (status: string) => { (data.locations.find((row) => (row._id as ObjectId).equals(ids.l1)) as Row).status = status; };
+  it("deactivating a location blocks staff assigned only there and Owner use of it, while the Owner keeps other locations", async () => {
+    signIn(ids.staff);
+    await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).resolves.toBeTruthy();
+    setLocation("inactive");
+    expect((await listAuthorizedWorkspaces()).workspaces).toEqual([]);
+    await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(getLocationCollection("parkingSessions", { tenantId: hex(ids.t1), locationId: hex(ids.l1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    signIn(ids.owner);
+    expect((await listAuthorizedWorkspaces()).workspaces[0].locations.map((location) => location.locationId)).toEqual([hex(ids.l4)]);
+    await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l4) })).resolves.toBeTruthy();
+    setLocation("active");
+    signIn(ids.staff);
+    await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).resolves.toBeTruthy();
+  });
+});
+
+describe("platform role isolation", () => {
+  it("platform_admin passes the platform guard but gets no tenant or location context", async () => {
+    signIn(ids.platform);
+    expect(await hasPlatformAccess()).toBe(true);
+    await expect(requirePlatformAccess()).resolves.toBeUndefined();
+    await expect(requireTenantContext()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(requireLocationContext()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it.each(["owner", "staff", "admin"] as const)("%s membership never grants platform access", async (role) => {
+    signIn(ids[role]);
+    expect(await hasPlatformAccess()).toBe(false);
+    await expect(requirePlatformAccess()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it("platform role is read fresh: revoking it or deactivating the user removes access immediately", async () => {
+    signIn(ids.platform);
+    expect(await hasPlatformAccess()).toBe(true);
+    delete (data.users.find((row) => (row._id as ObjectId).equals(ids.platform)) as Row).platformRole;
+    expect(await hasPlatformAccess()).toBe(false);
+    await expect(requirePlatformAccess()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    (data.users.find((row) => (row._id as ObjectId).equals(ids.platform)) as Row).status = "inactive";
+    await expect(requirePlatformAccess()).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+  it("an unknown platformRole value fails closed", async () => {
+    (data.users.find((row) => (row._id as ObjectId).equals(ids.owner)) as Row).platformRole = "super_admin";
+    signIn(ids.owner);
+    await expect(hasPlatformAccess()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(requirePlatformAccess()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
 
