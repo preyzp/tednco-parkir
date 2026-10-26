@@ -176,16 +176,18 @@ database, not development/production. See HANDOFF.md for evidence and limits.
 
 - [x] P2.1 — Integrasi authentication library (P2.1A seleksi + P2.1B foundation/schema alignment; verifikasi offline, tanpa live migration).
 - [ ] P2.2 — Implementasi login (P2.2A backend/session integration selesai offline; UI P2.2B belum).
-- [ ] P2.3 — Implementasi logout (backend sign-out/revocation check tersedia dari P2.2A; flow UI sudah diuji pada P2.2B; lifecycle acceptance lengkap tetap perlu review).
+- [x] P2.3 — Implementasi logout (acceptance offline lulus 2026-10-26: redirect /app setelah logout, replay cookie lama ditolak, logout tanpa sesi idempotent, revocation check gagal = 503; Better Auth asli dengan persistence sintetis, tanpa Atlas. Uji browser manual dengan akun nyata masih tertunda provisioning).
 - [ ] P2.4 — Implementasi secure session handling.
 - [ ] P2.5 — Implementasi password reset.
 - [ ] P2.6 — Implementasi users dan tenant memberships.
-- [ ] P2.7 — Implementasi active tenant context.
-- [ ] P2.8 — Implementasi location authorization.
+- [ ] P2.7 — Implementasi active tenant context (fondasi + pemilihan tenant:lokasi tersedia via P2.3A/P2.10; review lifecycle membership/role change tetap terbuka).
+- [ ] P2.8 — Implementasi location authorization (guard server P2.3A + picker P2.10 tersedia; enforcement per fitur bisnis menyusul).
 - [ ] P2.9 — Implementasi role/permission checks.
-- [ ] P2.10 — Implementasi protected application routes.
+- [x] P2.10 — Implementasi protected application routes (2026-10-26, offline: proxy optimistis /app/*, guard server per request, listAuthorizedWorkspaces + Server Action pilih lokasi tervalidasi, state loading/empty/forbidden/error; tanpa Atlas. Uji browser dengan akun nyata tertunda provisioning).
 - [ ] P2.11 — Implementasi audit logging foundation.
 - [ ] P2.12 — Tambahkan authentication dan tenancy tests.
+
+Live verification 2026-10-26 (Gate C, uji manual operator di browser pada database terisolasi `tednco_parkir_provision_dev`): login Owner, tenant scope, location selection, theme Light/Dark/System dan logout PASS; tidak ada sesi tertinggal setelah logout. Admin/Staff/platform_admin dan multi-tenant belum diuji live. Lihat HANDOFF.md.
 
 #### Role Support
 

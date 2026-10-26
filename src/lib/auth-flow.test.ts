@@ -103,6 +103,44 @@ test("real logout revokes the session and rejects replay of the old signed cooki
   expect((await route.GET(request("get-session", "GET", cookie))).status).toBe(401);
 });
 
+test("after real logout the /app server guard treats the replayed old cookie as unauthenticated", async () => {
+  const { cookie } = await login();
+  const { getCurrentSession, requireAuthenticatedSession } = await import("./auth-session");
+  await expect(requireAuthenticatedSession(new Headers({ cookie }))).resolves.toHaveProperty("user.id", user.id);
+  expect((await route.POST(request("sign-out", "POST", cookie, {}))).status).toBe(200);
+  // The /app workspace guard maps UNAUTHENTICATED to redirect("/login"); /login renders the form for null.
+  await expect(requireAuthenticatedSession(new Headers({ cookie }))).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  expect(await getCurrentSession(new Headers({ cookie }))).toBeNull();
+});
+
+test("real logout without a session or with an already revoked cookie is idempotent", async () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await route.POST(request("sign-out", "POST", undefined, {}));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  }
+  expect(context.internalAdapter.deleteSession).not.toHaveBeenCalled();
+  const { cookie } = await login();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await route.POST(request("sign-out", "POST", cookie, {}));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.getSetCookie().some((value) => value.includes("Max-Age=0"))).toBe(true);
+  }
+  expect(stored).toBeNull();
+  expect((await route.GET(request("get-session", "GET", cookie))).status).toBe(401);
+});
+
+test("real logout fails closed when the revocation check cannot read session storage", async () => {
+  const { cookie } = await login();
+  vi.mocked(context.internalAdapter.findSession).mockRejectedValue(new Error("synthetic secret storage failure"));
+  const response = await route.POST(request("sign-out", "POST", cookie, {}));
+  expect(response.status).toBe(503);
+  const body = await response.json();
+  expect(body.error.code).toBe("SERVICE_UNAVAILABLE");
+  expect(JSON.stringify(body)).not.toMatch(/synthetic secret|"ok":true/);
+});
+
 test("expired sessions and forged cookie signatures cannot authenticate", async () => {
   const { cookie } = await login();
   const lookups = vi.mocked(context.internalAdapter.findSession).mock.calls.length;

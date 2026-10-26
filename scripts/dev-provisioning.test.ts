@@ -53,6 +53,29 @@ it.each(["users", "tenants", "developmentProvisioning", "authAccounts"])("reject
   conflict = collection;
   await expect(provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]))).rejects.toThrow("not confirmed"); expect(writes).toEqual([]);
 });
+it("checks credential duplicates with the exact Better Auth key that is written, not the email", async () => {
+  await provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]));
+  const account = writes.find((row) => row.collection === "authAccounts")!.document;
+  const query = find.mock.calls.find(([name]) => name === "authAccounts")![1];
+  expect(query).toEqual({ $or: [{ providerId: "credential", accountId: account.accountId }, { userId: account.userId }] });
+  expect(JSON.stringify(query)).not.toContain("example.test");
+});
+it("aborts without writes when a credential already exists on the planned provider/account key", async () => {
+  // Matches only the real key shape (accountId = 24-hex userId), so the old
+  // email-based lookup would have missed it and continued to write.
+  find.mockImplementation((name: string, query: { $or?: { accountId?: string }[] }) => name === "authAccounts" && /^[a-f\d]{24}$/.test(query.$or?.[0]?.accountId ?? "") ? { _id: "existing-credential" } : null);
+  await expect(provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]))).rejects.toThrow("not confirmed");
+  expect(writes).toEqual([]);
+});
+it("rejects an existing user email in any letter case without adopting or mutating that account", async () => {
+  const mutations = { updateOne: vi.fn(), updateMany: vi.fn(), replaceOne: vi.fn(), findOneAndUpdate: vi.fn(), deleteOne: vi.fn(), deleteMany: vi.fn() };
+  const base = dbCall();
+  dbCall.mockReturnValue({ collection: (name: string) => ({ ...base.collection(name), ...mutations }) });
+  find.mockImplementation((name: string, query: { email?: { $regex: string; $options: string } }) => name === "users" && query.email && new RegExp(query.email.$regex, query.email.$options).test("SYNTHETIC.Owner@EXAMPLE.test") ? { _id: "existing-user", email: "SYNTHETIC.Owner@EXAMPLE.test" } : null);
+  await expect(provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]))).rejects.toThrow("not confirmed");
+  expect(writes).toEqual([]);
+  for (const mutation of Object.values(mutations)) expect(mutation).not.toHaveBeenCalled();
+});
 it.each(["developmentProvisioning", "users", "authAccounts", "tenants", "locations", "memberships"])("rolls back failures at %s (mock transaction)", async (collection) => {
   failAt = collection; await expect(provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]))).rejects.toThrow("not confirmed"); expect(writes).toEqual([]); expect(end).toHaveBeenCalledOnce();
 });

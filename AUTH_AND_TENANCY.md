@@ -64,6 +64,16 @@ Verifikasi offline: 38 authorization tests (termasuk pengganti test stub fail-cl
 
 ---
 
+## P2.10 - Route protection dan pemilihan tenant/lokasi (2026-10-26)
+
+Menggantikan catatan P2.3A bahwa belum ada selected-tenant cookie/switcher.
+
+- **Proxy** `src/proxy.ts` (matcher `/app/:path*`) hanya cek optimistis keberadaan cookie sesi Better Auth (`getSessionCookie`), tanpa DB; tanpa cookie → redirect `/login`. Bukan bukti autentikasi.
+- **Guard server per request:** setiap halaman `/app/*` memanggil `resolveActiveWorkspace()` (`src/lib/workspace.ts`) di dalam Suspense: verified session → `listAuthorizedWorkspaces()` → `requireLocationContext({tenantId, locationId})`. UNAUTHENTICATED → redirect `/login`; FORBIDDEN → state "Akses lokasi ditolak"; error lain → state tidak tersedia. Halaman/aksi `/app` baru wajib memakai helper ini (atau guard DAL), bukan proxy.
+- **`listAuthorizedWorkspaces()`** (authorization.ts) mengembalikan opsi tampilan berupa string saja: membership aktif valid dan unik per tenant, tenant aktif, lokasi aktif tenant tersebut (owner semua; admin/staff hanya `locationIds` yang aktif dan milik tenant). Membership malformed/duplikat/tanpa assignment dilewati. platform_admin tanpa membership mendapat daftar kosong.
+- **Pilihan lokasi** disimpan di cookie `tednco_workspace` = `userId.tenantId.locationId` (HttpOnly, SameSite=Lax, Secure di production, path `/`, 30 hari). Cookie hanya input pilihan tidak tepercaya: selalu divalidasi ulang; milik user lain diabaikan; tidak cocok lagi → forbidden. Cookie hanya ditulis oleh Server Action `selectWorkspace` setelah `requireLocationContext` sukses. Satu opsi → otomatis tanpa cookie; banyak opsi tanpa pilihan → `/app/pilih-lokasi`.
+- Batasan: cookie tidak dihapus saat logout (aman karena terikat userId dan divalidasi ulang); belum ada audit log pergantian lokasi; konteks tidak di-cache lintas request.
+
 ## 2. Teknologi Autentikasi
 
 Gunakan library autentikasi yang terpelihara, kompatibel dengan versi Next.js yang digunakan, dan sesuai dengan kebutuhan aplikasi.

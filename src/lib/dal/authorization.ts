@@ -75,6 +75,50 @@ export async function requireLocationContext(selection: AuthorizationSelection =
     return Object.freeze({ ...context, locationId: new ObjectId(location._id) });
   });
 }
+export interface AuthorizedWorkspace {
+  readonly tenantId: string;
+  readonly tenantName: string;
+  readonly role: TenantRole;
+  readonly locations: readonly { readonly locationId: string; readonly name: string }[];
+}
+const maxMemberships = 50;
+const maxLocations = 200;
+// Picker options only: plain strings, no grants. Using one still requires
+// requireLocationContext() on every request. platform_admin gets nothing
+// here without an explicit membership.
+export async function listAuthorizedWorkspaces(): Promise<{ userId: string; workspaces: AuthorizedWorkspace[] }> {
+  return boundary(async () => {
+    const { userId, db } = await identity();
+    const rows = await db.collection<Membership>("memberships").find({ userId, status: "active" }, { projection: { _id: 1, userId: 1, tenantId: 1, status: 1, role: 1, locationIds: 1, permissions: 1 } }).limit(maxMemberships).toArray();
+    const members = rows.flatMap((row) => {
+      const checked = membershipSchema.safeParse(row);
+      if (!checked.success || !same(checked.data.userId, userId)) return [];
+      if (new Set(checked.data.locationIds.map((id) => id.toHexString())).size !== checked.data.locationIds.length) return [];
+      return [checked.data];
+    });
+    // Duplicate memberships for one tenant are ambiguous; the guard rejects them too.
+    const perTenant = new Map<string, number>();
+    for (const member of members) perTenant.set(member.tenantId.toHexString(), (perTenant.get(member.tenantId.toHexString()) ?? 0) + 1);
+    const unique = members.filter((member) => perTenant.get(member.tenantId.toHexString()) === 1 && (member.role === "owner" || member.locationIds.length > 0));
+    if (unique.length === 0) return { userId: userId.toHexString(), workspaces: [] };
+    const tenants = await db.collection<Tenant>("tenants").find({ _id: { $in: unique.map((member) => member.tenantId) }, status: "active" }, { projection: { _id: 1, name: 1, status: 1 } }).limit(maxMemberships).toArray();
+    const workspaces: AuthorizedWorkspace[] = [];
+    for (const member of unique) {
+      const tenant = tenants.find((row) => row._id instanceof ObjectId && same(row._id, member.tenantId) && row.status === "active" && typeof row.name === "string");
+      if (!tenant) continue;
+      const owner = member.role === "owner";
+      const rows = await db.collection<Location>("locations").find({ tenantId: member.tenantId, status: "active", ...(owner ? {} : { _id: { $in: member.locationIds } }) }, { projection: { _id: 1, tenantId: 1, name: 1, status: 1 } }).limit(maxLocations).toArray();
+      const locations = rows
+        .filter((row) => row._id instanceof ObjectId && row.tenantId instanceof ObjectId && same(row.tenantId, member.tenantId) && row.status === "active" && typeof row.name === "string" && (owner || member.locationIds.some((id) => same(id, row._id))))
+        .map((row) => Object.freeze({ locationId: row._id.toHexString(), name: row.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "id"));
+      if (locations.length === 0) continue;
+      workspaces.push(Object.freeze({ tenantId: member.tenantId.toHexString(), tenantName: tenant.name, role: member.role, locations: Object.freeze(locations) }));
+    }
+    workspaces.sort((a, b) => a.tenantName.localeCompare(b.tenantName, "id"));
+    return { userId: userId.toHexString(), workspaces };
+  });
+}
 export async function requirePlatformAccess(): Promise<void> {
   return boundary(async () => { const { user } = await identity(); if (user.platformRole !== "platform_admin") deny(); });
 }

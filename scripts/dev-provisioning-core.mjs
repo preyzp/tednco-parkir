@@ -54,7 +54,9 @@ export async function provisionDevelopmentOwner(client, input) {
       const existingUser = await db.collection("users").findOne({ email: { $regex: `^${input.email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" } }, options);
       const existingTenant = await db.collection("tenants").findOne({ slug }, options);
       const existingMarker = await db.collection("developmentProvisioning").findOne({ _id: markerId }, options);
-      const existingCredential = await db.collection("authAccounts").findOne({ providerId: "credential", accountId: input.email }, options);
+      // Better Auth credential accounts are keyed by providerId + accountId=userId
+      // hex (the unique index), never by email; email identity is the users check.
+      const existingCredential = await db.collection("authAccounts").findOne({ $or: [{ providerId: "credential", accountId: ids.userId.toHexString() }, { userId: ids.userId }] }, options);
       if (existingUser || existingTenant || existingMarker || existingCredential) throw new Error("Provisioning target already exists. No existing account or tenant will be adopted or modified.");
       const now = new Date();
       // Unique _id serializes concurrent runs; retries recheck all conflicts.
