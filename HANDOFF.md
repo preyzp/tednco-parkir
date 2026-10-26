@@ -4,6 +4,17 @@
 > Verifikasi ulang 2026-10-26 tercatat di bagian berikut; snapshot lama di bawah dipertahankan sebagai riwayat.
 > Phase 1 complete dan terverifikasi pada 2026-10-18: 196 tes offline, 4 integration tests Atlas pada database test acak, lint/typecheck/build lulus. Tidak ada write/index setup pada database development.
 
+## Upgrade keamanan Next.js — 2026-10-26
+
+- Baseline: working tree bersih setelah checkpoint Phase 1 `b793f86fc5e98072f093d0123bcd846c904df464`; Next.js 16.4.0, pnpm 12.11.2, Node 24.11.1.
+- Scope/acceptance: upgrade Next.js ke **tepat 16.4.3**, package/lockfile konsisten, seluruh checks lulus, tanpa upgrade dependency unrelated atau perubahan aplikasi. Perintah: `pnpm add next@16.4.3 --save-exact`.
+- Terverifikasi dari package terpasang dan `pnpm list`: **next 16.4.3**, React/React DOM **19.3.0**, TypeScript **5.9.3**. React memenuhi peer range Next.js (`^19.0.0`); TypeScript memenuhi minimum **5.1.0** pada dokumentasi lokal versi terpasang, dan Node memenuhi engine **>=20.9.0**. `eslint-config-next` tetap **16.4.0**, lint lulus; tidak ada kebutuhan perubahan kompatibilitas.
+- `package.json` hanya mengubah pin `next`. Lockfile hanya memperbarui Next.js beserta `@next/env` dan optional SWC **16.4.3**; dependency lainnya dipertahankan, termasuk sharp **0.35.5**. Source/config aplikasi tidak diubah.
+- Verifikasi: `pnpm test` **196/196 lulus, 9 file, 0 gagal, 1,22 detik**; `pnpm lint` **exit 0**; `pnpm exec tsc --noEmit` **exit 0**; `pnpm build` **exit 0**, Next.js **16.4.3**, static generation **4/4**. Build memakai akses jaringan untuk Google Fonts existing. Peringatan kerentanan Next.js sebelumnya tidak muncul lagi. Tidak menjalankan live MongoDB integration atau membuka/menulis Atlas.
+- Peringatan tersisa: instalasi pnpm selesai memperbarui package/lockfile/node_modules tetapi exit **1** dengan `ERR_PNPM_IGNORED_BUILDS` untuk **unrs-resolver@1.12.2**, sesuai issue existing. Tidak menyetujui build script atau mengubah kebijakan script; seluruh checks di atas tetap lulus. pnpm juga melaporkan deprecation **eslint@9.39.5** dan ketersediaan pnpm **12.15.0**; keduanya tidak di-upgrade karena di luar scope.
+- Referensi resmi: [Next.js Security Update for Upstream Vulnerabilities, 14 Oktober 2026](https://nextjs.org/blog/nextjs-security-update-october-14-2026) menetapkan perbaikan jalur 16.4 mulai 16.4.1; target owner 16.4.3 telah dipasang. Hasil ini memverifikasi patch dan build, bukan klaim audit keamanan menyeluruh.
+- File berubah hanya `package.json`, `pnpm-lock.yaml`, `HANDOFF.md`. Tidak commit/push. Phase 1 tetap complete; next planned task tetap **P2.1 — Authentication Library Selection and Setup**, belum dimulai.
+
 ## Verifikasi penutupan Phase 1 — 2026-10-26
 
 Scope/acceptance: verifikasi P1.1–P1.9 dan bukti integration existing, jalankan checks offline/static/build, periksa Git ignore, selaraskan keputusan UI, tanpa perubahan production code atau akses Atlas. Tidak memulai Phase 2, memasang dependency, commit, push, atau membuang perubahan existing.
