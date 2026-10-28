@@ -1,7 +1,7 @@
 import "server-only";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AlertCircle, ArrowLeft, ArrowRight, Building2, CircleCheck, CirclePause, Inbox, Info, Mail, MapPin, Plus, Search, ServerCrash, ShieldAlert, ShieldCheck, UserRound, X } from "lucide-react";
+import { AlertCircle, ArrowRight, Building2, CircleCheck, CirclePause, Inbox, Info, Mail, MapPin, Plus, Search, ServerCrash, ShieldAlert, ShieldCheck, UserRound, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AppError } from "../../lib/errors";
 import { getPlatformOverview, getPlatformTenantDetail, listPlatformTenants, parseTenantListQuery, requirePlatformAccess } from "../../lib/dal";
@@ -9,11 +9,13 @@ import { AUTHENTICATED_PATH, LOGIN_PATH } from "../../lib/login";
 import { PLATFORM_NEW_TENANT_PATH, PLATFORM_TENANTS_PATH, formatCount, formatTenantDate, tenantListHref, tenantStatusLabel } from "../../lib/platform-labels";
 import { LogoutButton } from "../auth/logout-button";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { BackLink } from "../back-link";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Skeleton } from "../ui/skeleton";
+import { FlashToast } from "../flash-toast";
 import { CreateTenantForm } from "./create-tenant-form";
 import { RenameTenantDialog, TenantStatusActions } from "./tenant-management";
 import { LocationDialog, LocationStatusDialog, RenameOwnerDialog } from "./tenant-resources";
@@ -117,7 +119,7 @@ export async function NewTenantContent() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="space-y-1">
-        <Button asChild variant="ghost" className="-ml-3 h-11"><Link href={PLATFORM_TENANTS_PATH}><ArrowLeft aria-hidden="true" />Daftar tenant</Link></Button>
+        <BackLink href={PLATFORM_TENANTS_PATH} to="daftar tenant" />
         <h1 className="text-2xl font-semibold tracking-tight">Buat Tenant Baru</h1>
         <p className="text-sm text-muted-foreground">Tenant, lokasi pertama, dan akun Owner dibuat sekaligus. Jika salah satu gagal, tidak ada data yang tersimpan.</p>
       </div>
@@ -126,6 +128,7 @@ export async function NewTenantContent() {
   );
 }
 
+const flashParams = ["dibuat", "diperbarui"] as const;
 const locationStatusLabel = { active: "Aktif", inactive: "Nonaktif", unknown: "Tidak dikenal" } as const;
 // Text + icon, never color alone.
 function LocationStatusBadge({ status }: { status: keyof typeof locationStatusLabel }) {
@@ -143,22 +146,28 @@ export async function TenantDetailContent({ params, searchParams }: { params: Pr
   // The flag only selects a message; the status shown is read from the database.
   const justCreated = query.dibuat === "1";
   const ownerReady = tenant.owners.some((owner) => owner.accountStatus === "active" && owner.membershipStatus === "active");
+  const updateNotices: Record<string, { title: string; description?: string }> = {
+    nama: { title: "Nama usaha diperbarui." },
+    status: { title: `Status tenant kini ${tenantStatusLabel(tenant.status)}.`, description: "Berlaku pada permintaan berikutnya pengguna tenant." },
+    owner: { title: "Nama Owner diperbarui." },
+    "lokasi-baru": { title: "Lokasi baru ditambahkan.", description: "Lokasi langsung berstatus Aktif." },
+    lokasi: { title: "Lokasi diperbarui." },
+    "status-lokasi": { title: "Status lokasi diperbarui.", description: "Berlaku pada permintaan berikutnya pengguna tenant." },
+  };
+  const noticeKey = typeof query.diperbarui === "string" && Object.hasOwn(updateNotices, query.diperbarui) ? query.diperbarui : undefined;
+  const notice = noticeKey ? { key: noticeKey, ...updateNotices[noticeKey] } : undefined;
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <Button asChild variant="ghost" className="-ml-3 h-11"><Link href={PLATFORM_TENANTS_PATH}><ArrowLeft aria-hidden="true" />Daftar tenant</Link></Button>
+        <BackLink href={PLATFORM_TENANTS_PATH} to="daftar tenant" />
         <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-semibold tracking-tight break-words">{tenant.name}</h1><TenantStatusBadge status={tenant.status} /></div>
       </div>
-      {justCreated && (ownerReady
-        ? <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Tenant dan akun Owner berhasil dibuat</AlertTitle><AlertDescription>Owner dapat masuk dengan email di bawah dan password awal yang Anda tetapkan.</AlertDescription></Alert>
-        : <Alert variant="destructive"><AlertCircle aria-hidden="true" /><AlertTitle>Status Owner perlu diperiksa</AlertTitle><AlertDescription>Tenant tersimpan, tetapi akun Owner aktif tidak ditemukan. Jangan membuat ulang tenant ini.</AlertDescription></Alert>)}
-      {query.diperbarui === "nama" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Nama usaha diperbarui</AlertTitle><AlertDescription>Perubahan tersimpan dan tercatat di audit log.</AlertDescription></Alert>}
-      {query.diperbarui === "status" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Status tenant diperbarui</AlertTitle><AlertDescription>Status saat ini: {tenantStatusLabel(tenant.status)}. Perubahan tercatat di audit log.</AlertDescription></Alert>}
+      {/* Transient outcomes → one-time toast (flag removed from the URL). Persistent
+          conditions below stay as banners because they describe current state. */}
+      {justCreated && ownerReady && <FlashToast id={`tenant-created-${tenant.id}`} kind="success" title="Tenant dan akun Owner berhasil dibuat." description="Owner dapat masuk dengan email dan password awal yang Anda tetapkan." clearParams={flashParams} />}
+      {notice && <FlashToast id={`tenant-${notice.key}-${tenant.id}`} kind="success" title={notice.title} description={notice.description} clearParams={flashParams} />}
+      {justCreated && !ownerReady && <Alert variant="destructive"><AlertCircle aria-hidden="true" /><AlertTitle>Status Owner perlu diperiksa</AlertTitle><AlertDescription>Tenant tersimpan, tetapi akun Owner aktif tidak ditemukan. Jangan membuat ulang tenant ini.</AlertDescription></Alert>}
       {tenant.status !== "active" && <Alert variant="destructive"><ShieldAlert aria-hidden="true" /><AlertTitle>Tenant {tenantStatusLabel(tenant.status).toLowerCase()}</AlertTitle><AlertDescription>Owner, Admin, dan Staff tenant ini tidak dapat mengakses operasional. Data tetap tersimpan.</AlertDescription></Alert>}
-      {query.diperbarui === "owner" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Nama Owner diperbarui</AlertTitle><AlertDescription>Perubahan tersimpan dan tercatat di audit log.</AlertDescription></Alert>}
-      {query.diperbarui === "lokasi-baru" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Lokasi baru ditambahkan</AlertTitle><AlertDescription>Lokasi langsung aktif dan tercatat di audit log.</AlertDescription></Alert>}
-      {query.diperbarui === "lokasi" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Lokasi diperbarui</AlertTitle><AlertDescription>Perubahan tersimpan dan tercatat di audit log.</AlertDescription></Alert>}
-      {query.diperbarui === "status-lokasi" && <Alert><CircleCheck aria-hidden="true" /><AlertTitle>Status lokasi diperbarui</AlertTitle><AlertDescription>Perubahan berlaku pada permintaan berikutnya dan tercatat di audit log.</AlertDescription></Alert>}
 
       <Card>
         <CardContent className="space-y-4">

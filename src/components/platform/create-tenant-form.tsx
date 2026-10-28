@@ -2,9 +2,10 @@
 import { useActionState, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { AlertCircle, Building2, Eye, EyeOff, KeyRound, LoaderCircle, MapPin, UserRound } from "lucide-react";
+import { toast } from "sonner";
 import { createTenantAction, type CreateTenantFormState } from "../../lib/platform-actions";
 import { PLATFORM_TENANTS_PATH, suggestSlug, tenantTimezoneLabels, tenantTimezones } from "../../lib/platform-labels";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../lib/login";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -29,7 +30,7 @@ function PasswordInput({ id, describedBy, invalid, disabled, minLength }: { id: 
   const [visible, setVisible] = useState(false);
   return (
     <div className="relative">
-      <Input id={id} name={id} type={visible ? "text" : "password"} required minLength={minLength} maxLength={128} autoComplete="new-password" aria-invalid={invalid} aria-describedby={describedBy} className="h-11 pr-12" disabled={disabled} />
+      <Input id={id} name={id} type={visible ? "text" : "password"} required minLength={minLength} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" aria-invalid={invalid} aria-describedby={describedBy} className="h-11 pr-12" disabled={disabled} />
       <Button type="button" variant="ghost" size="icon" className="absolute top-0 right-0 size-11" disabled={disabled} aria-controls={id} aria-label={visible ? "Sembunyikan password" : "Tampilkan password"} aria-pressed={visible} onClick={() => setVisible(!visible)}>
         {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
       </Button>
@@ -45,7 +46,13 @@ function Section({ title, icon: Icon, children }: { title: string; icon: typeof 
 export function CreateTenantForm() {
   const submitting = useRef(false);
   const [state, action, pending] = useActionState(async (previous: CreateTenantFormState, formData: FormData) => {
-    try { return await createTenantAction(previous, formData); }
+    try {
+      const next = await createTenantAction(previous, formData);
+      // Fired once per submission (not from render). Success redirects and is
+      // announced on the detail page; field errors stay inline below.
+      if (next.status === "error" && next.message) toast.error("Tenant belum dibuat.", { id: "create-tenant-error", description: next.message });
+      return next;
+    }
     finally { submitting.current = false; }
   }, initialState);
   const [values, setValues] = useState<Record<TextField, string>>({ tenantName: "", slug: "", locationName: "", locationAddress: "", ownerName: "", ownerEmail: "" });
@@ -69,9 +76,6 @@ export function CreateTenantForm() {
 
   return (
     <form action={action} onSubmit={guard} aria-busy={pending} noValidate className="space-y-6">
-      {state.status === "error" && state.message && (
-        <Alert variant="destructive"><AlertCircle aria-hidden="true" /><AlertTitle>Tenant belum dibuat</AlertTitle><AlertDescription>{state.message}</AlertDescription></Alert>
-      )}
       <p className="text-sm text-muted-foreground">Kolom bertanda <span aria-hidden="true" className="text-destructive">*</span><span className="sr-only">bintang</span> wajib diisi.</p>
       <Section title="Data usaha" icon={Building2}>
         <Field id="tenantName" label="Nama usaha" required error={errors.tenantName}>{input("tenantName", { required: true, maxLength: 100, autoComplete: "organization" })}</Field>
@@ -90,8 +94,8 @@ export function CreateTenantForm() {
       <Section title="Akun Owner" icon={UserRound}>
         <Field id="ownerName" label="Nama Owner" required error={errors.ownerName}>{input("ownerName", { required: true, maxLength: 100, autoComplete: "off" })}</Field>
         <Field id="ownerEmail" label="Email Owner" required error={errors.ownerEmail}>{input("ownerEmail", { type: "email", required: true, maxLength: 254, autoComplete: "off", autoCapitalize: "none", spellCheck: false })}</Field>
-        <Field id="ownerPassword" label="Password awal" required error={errors.ownerPassword} hint="12–128 karakter. Hanya disimpan dalam bentuk hash dan tidak dapat dilihat kembali.">
-          <PasswordInput id="ownerPassword" minLength={12} invalid={Boolean(errors.ownerPassword)} describedBy={describe("ownerPassword", true)} disabled={pending} />
+        <Field id="ownerPassword" label="Password awal" required error={errors.ownerPassword} hint={`${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} karakter. Hanya disimpan dalam bentuk hash dan tidak dapat dilihat kembali.`}>
+          <PasswordInput id="ownerPassword" minLength={PASSWORD_MIN_LENGTH} invalid={Boolean(errors.ownerPassword)} describedBy={describe("ownerPassword", true)} disabled={pending} />
         </Field>
         <Field id="ownerPasswordConfirm" label="Konfirmasi password awal" required error={errors.ownerPasswordConfirm}>
           <PasswordInput id="ownerPasswordConfirm" invalid={Boolean(errors.ownerPasswordConfirm)} describedBy={describe("ownerPasswordConfirm")} disabled={pending} />

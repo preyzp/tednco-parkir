@@ -1,11 +1,13 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { ObjectId } from "mongodb";
-const mocks = vi.hoisted(() => ({ getAuth: vi.fn(), handler: vi.fn(), getSession: vi.fn(), getDb: vi.fn(), findOne: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getAuth: vi.fn(), handler: vi.fn(), getSession: vi.fn(), getDb: vi.fn(), findOne: vi.fn(), owner: vi.fn() }));
+vi.mock("../../../../lib/dal", () => ({ requireOwnerAccount: mocks.owner }));
 vi.mock("../../../../lib/auth", () => ({ getAuth: mocks.getAuth }));
 vi.mock("../../../../lib/mongodb", () => ({ getDb: mocks.getDb }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 import { GET, POST } from "./route";
+import { AppError } from "../../../../lib/errors";
 
 const id = new ObjectId();
 const user = { id: id.toHexString(), name: "Synthetic", email: "synthetic@example.test", emailVerified: true };
@@ -95,4 +97,44 @@ test("unimplemented record endpoints/wrong methods are unavailable without auth 
   expect((await GET(request("list-accounts"))).status).toBe(404);
   expect((await GET(request("sign-in/email"))).status).toBe(404);
   expect(mocks.getAuth).not.toHaveBeenCalled();
+});
+
+describe("change-password", () => {
+  const body = (value: unknown) => new Request("https://parkir.example.test/api/auth/change-password", { method: "POST", headers: { cookie: "synthetic=cookie", "content-type": "application/json" }, body: typeof value === "string" ? value : JSON.stringify(value) });
+  const valid = { currentPassword: "synthetic-old-password", newPassword: "synthetic-new-password" };
+  beforeEach(() => mocks.owner.mockResolvedValue(undefined));
+  test("forwards only the two passwords with revocation forced and returns no native token", async () => {
+    const nativeHeaders = new Headers({ "set-auth-token": "synthetic-secret" });
+    nativeHeaders.append("set-cookie", "better-auth.session_token=fresh; HttpOnly; Secure; SameSite=Lax");
+    mocks.handler.mockResolvedValueOnce(Response.json({ token: "synthetic-secret", user }, { headers: nativeHeaders }));
+    const response = await POST(body({ ...valid, revokeOtherSessions: false, userId: "someone-else", email: "x@example.test" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.getSetCookie()).toEqual(["better-auth.session_token=fresh; HttpOnly; Secure; SameSite=Lax"]);
+    expect(response.headers.get("set-auth-token")).toBeNull();
+    const forwarded = mocks.handler.mock.calls[0][0] as Request;
+    expect(await forwarded.json()).toEqual({ ...valid, revokeOtherSessions: true });
+    expect(forwarded.headers.get("cookie")).toBe("synthetic=cookie");
+    expect(mocks.owner).toHaveBeenCalledOnce();
+  });
+  test.each([["invalid JSON", "{not json"], ["oversized body", JSON.stringify({ ...valid, padding: "x".repeat(5000) })], ["missing current password", { newPassword: valid.newPassword }]])("rejects %s before the Owner check or Better Auth", async (_case, value) => {
+    expect((await POST(body(value))).status).toBe(400);
+    expect(mocks.owner).not.toHaveBeenCalled(); expect(mocks.getAuth).not.toHaveBeenCalled();
+  });
+  test.each([["UNAUTHENTICATED", 401], ["FORBIDDEN", 403]] as const)("Owner gate %s stops the request before Better Auth", async (code, status) => {
+    mocks.owner.mockRejectedValueOnce(new AppError(code));
+    expect((await POST(body(valid))).status).toBe(status);
+    expect(mocks.getAuth).not.toHaveBeenCalled();
+  });
+  test.each([["INVALID_PASSWORD", "currentPassword", "INVALID"], ["PASSWORD_TOO_SHORT", "newPassword", "TOO_SMALL"], ["CREDENTIAL_ACCOUNT_NOT_FOUND", undefined, undefined]])("maps native %s without echoing native messages", async (code, field, issue) => {
+    mocks.handler.mockResolvedValueOnce(Response.json({ code, message: "synthetic native secret" }, { status: 400 }));
+    const response = await POST(body(valid));
+    const json = await response.json();
+    expect(response.status).toBe(400);
+    expect(json.error.fieldErrors?.[0]).toEqual(field ? { field, code: issue, message: expect.any(String) } : undefined);
+    expect(JSON.stringify(json)).not.toContain("synthetic native secret");
+  });
+  test("GET is not exposed", async () => {
+    expect((await GET(new Request("https://parkir.example.test/api/auth/change-password"))).status).toBe(404);
+  });
 });

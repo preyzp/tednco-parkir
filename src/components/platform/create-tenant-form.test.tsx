@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, configure } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ action: vi.fn() }));
+// Typing-heavy jsdom form: generous limits for loaded parallel runs (logic unchanged).
+vi.setConfig({ testTimeout: 20_000 });
+configure({ asyncUtilTimeout: 5_000 });
+const mocks = vi.hoisted(() => ({ action: vi.fn(), toastError: vi.fn(), toastSuccess: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: mocks.toastError, success: mocks.toastSuccess } }));
 vi.mock("../../lib/platform-actions", () => ({ createTenantAction: mocks.action }));
 import { CreateTenantForm } from "./create-tenant-form";
 
@@ -84,11 +88,14 @@ it("announces server errors, marks invalid fields, keeps text input and clears p
   render(<CreateTenantForm />); const user = userEvent.setup();
   await fill(user);
   await user.click(screen.getByRole("button", { name: "Buat tenant" }));
-  const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Tenant belum dibuat");
-  expect(alert.textContent).toContain("Slug sudah digunakan tenant lain.");
+  // The toast fires inside the action, slightly before React commits the new
+  // state, so wait for the inline field error itself rather than the toast.
   const slug = field("Slug unik");
-  expect(slug.getAttribute("aria-invalid")).toBe("true");
+  await waitFor(() => expect(slug.getAttribute("aria-invalid")).toBe("true"));
+  // Outcome → exactly one error toast; the field error stays inline.
+  expect(mocks.toastError).toHaveBeenCalledTimes(1);
+  expect(mocks.toastError).toHaveBeenCalledWith("Tenant belum dibuat.", { id: "create-tenant-error", description: "Slug sudah digunakan tenant lain." });
+  expect(mocks.toastSuccess).not.toHaveBeenCalled();
   expect(document.getElementById(slug.getAttribute("aria-describedby")!)?.textContent).toContain("Pilih slug lain");
   expect((field("Nama usaha") as HTMLInputElement).value).toBe("Parkir Sentosa Jaya");
   expect((field("Email Owner") as HTMLInputElement).value).toBe("budi@example.test");

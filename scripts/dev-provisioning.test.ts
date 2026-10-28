@@ -108,3 +108,7 @@ it("ambiguous transaction commit is reported as unconfirmed without compensating
   await expect(provisionDevelopmentOwner(client, validateProvisioning(env(), ["--apply"]))).rejects.toThrow("not confirmed");
   expect(writes).toEqual([]); expect(end).toHaveBeenCalledOnce();
 });
+it.each([["5 characters", "abcde", false], ["exactly 6 characters", "abcdef", true], ["a longer password", "a-much-longer-password-1234", true], ["128 characters", "x".repeat(128), true], ["129 characters", "x".repeat(129), false]])("Owner provisioning password policy: %s", (_case, password, accepted) => {
+  const run = () => validateProvisioning({ ...env(), TEDNCO_DEV_OWNER_PASSWORD: password }, []);
+  if (accepted) expect(run().password).toBe(password); else expect(run).toThrow("6-128");
+});

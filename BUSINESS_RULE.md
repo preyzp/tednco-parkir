@@ -260,6 +260,14 @@ Sistem tidak boleh otomatis mengganti tarif menjadi Menginap hanya karena kendar
 
 Aturan ini disengaja agar petugas tetap dapat menyesuaikan transaksi dengan kondisi operasional sebenarnya.
 
+#### Saran tarif dan kebijakan default MVP (keputusan operator, 2026-10-27)
+
+- Sistem **menyarankan** Reguler atau Menginap beserta jumlah malam; petugas tetap memilih secara eksplisit dan boleh mengubah jumlah malam (bilangan bulat positif). Sistem tidak pernah mengganti tarif sendiri.
+- Jumlah malam yang disarankan = banyaknya jam tutup lokasi (default 00.00) yang terlewati selama parkir, dihitung pada zona waktu lokasi (fallback zona tenant): masuk sebelum jam tutup dan keluar setelahnya. Keluar tepat pada jam tutup tidak dihitung; masuk setelah jam tutup (mis. 02.00) hanya menghitung jam tutup berikutnya. Jam buka default 05.00 hanya informasi.
+- Menginap **menggantikan** Reguler: total = tarif per malam × jumlah malam.
+- Bila lokasi tidak memiliki tarif aktif untuk jenis kendaraan/jenis tarif, dipakai kebijakan default yang disetujui operator: Reguler Rp5.000 dan Menginap Rp10.000 per malam, sama untuk Motor dan Mobil. Ini bukan daftar harga produksi; tarif aktif lokasi selalu didahulukan, dan sumbernya ("Tarif lokasi"/"Tarif default") ditampilkan serta disimpan pada snapshot transaksi. Lebih dari satu tarif aktif untuk kombinasi yang sama memblokir checkout.
+- Jam operasional per lokasi belum dapat dikonfigurasi; nilai default di atas berlaku untuk semua lokasi sampai pengaturan tersedia.
+
 ### 5.5 Perubahan tarif
 
 Tarif dapat diubah oleh pengguna yang memiliki izin.

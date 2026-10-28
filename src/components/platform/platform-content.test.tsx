@@ -8,6 +8,7 @@ vi.mock("./tenant-management", () => ({
   RenameTenantDialog: ({ currentName }: { currentName: string }) => `[Rename:${currentName}]`,
   TenantStatusActions: ({ status }: { status: string }) => `[Status:${status}]`,
 }));
+vi.mock("../flash-toast", () => ({ FlashToast: ({ kind, title, clearParams }: { kind: string; title: string; clearParams: string[] }) => `[Toast:${kind}:${title}|clear=${clearParams.join(",")}]` }));
 vi.mock("./tenant-resources", () => ({
   RenameOwnerDialog: ({ currentName }: { currentName: string }) => `[OwnerRename:${currentName}]`,
   LocationDialog: ({ location }: { location?: { name: string } }) => (location ? `[LocationEdit:${location.name}]` : "[LocationCreate]"),
@@ -113,6 +114,14 @@ describe("create tenant pages", () => {
     mocks.list.mockResolvedValue(list());
     expect(await render(directory())).toContain('href="/platform/tenants/new"');
   });
+  it("create and detail pages offer 'Kembali' to the tenant list above the title", async () => {
+    mocks.guard.mockResolvedValue(undefined);
+    mocks.detail.mockResolvedValue(tenant);
+    for (const markup of [await render(NewTenantContent()), await render(detail())]) {
+      expect(markup).toMatch(/<a[^>]*aria-label="Kembali ke daftar tenant"[^>]*href="\/platform\/tenants"[^>]*>.*?Kembali<\/a>/);
+      expect(markup.indexOf("Kembali")).toBeLessThan(markup.indexOf("<h1"));
+    }
+  });
   const tenant = { id: "a".repeat(24), name: "Parkir Sentosa", slug: "parkir-sentosa", status: "active", timezone: "Asia/Makassar", createdAt: "2026-01-04T00:00:00.000Z", locations: [{ id: "c".repeat(24), name: "Lokasi Utara", address: "Jl. Mawar 1", status: "active" }], owners: [{ userId: "d".repeat(24), name: "Budi", email: "budi@example.test", accountStatus: "active", membershipStatus: "active" }] };
   it("detail shows the stored profile, Owner status and first location", async () => {
     mocks.detail.mockResolvedValue(tenant);
@@ -123,11 +132,11 @@ describe("create tenant pages", () => {
   });
   it("after creation confirms success only when the database shows an active Owner", async () => {
     mocks.detail.mockResolvedValue(tenant);
-    expect(await render(detail(undefined, { dibuat: "1" }))).toContain("Tenant dan akun Owner berhasil dibuat");
+    expect(await render(detail(undefined, { dibuat: "1" }))).toContain("[Toast:success:Tenant dan akun Owner berhasil dibuat.|clear=dibuat,diperbarui]");
     mocks.detail.mockResolvedValue({ ...tenant, owners: [] });
     const missing = await render(detail(undefined, { dibuat: "1" }));
     expect(missing).toContain("Status Owner perlu diperiksa");
-    expect(missing).not.toContain("berhasil dibuat");
+    expect(missing).not.toContain("berhasil dibuat"); expect(missing).not.toContain("[Toast:");
   });
   it("detail offers rename and status management driven by the stored status", async () => {
     mocks.detail.mockResolvedValue(tenant);
@@ -159,20 +168,27 @@ describe("create tenant pages", () => {
     expect(markup).toContain("perubahan password harus melalui alur reset yang aman");
     expect(markup).not.toMatch(/type="password"/);
   });
-  it.each([["owner", "Nama Owner diperbarui"], ["lokasi-baru", "Lokasi baru ditambahkan"], ["lokasi", "Lokasi diperbarui"], ["status-lokasi", "Status lokasi diperbarui"]])("confirms the %s update", async (notice, text) => {
+  it.each([["owner", "Nama Owner diperbarui."], ["lokasi-baru", "Lokasi baru ditambahkan."], ["lokasi", "Lokasi diperbarui."], ["status-lokasi", "Status lokasi diperbarui."]])("confirms the %s update with a one-time success toast", async (notice, text) => {
     mocks.detail.mockResolvedValue(tenant);
-    expect(await render(detail(undefined, { diperbarui: notice }))).toContain(text);
+    expect(await render(detail(undefined, { diperbarui: notice }))).toContain(`[Toast:success:${text}|clear=dibuat,diperbarui]`);
+  });
+  it("ignores unknown or repeated outcome flags instead of toasting them", async () => {
+    mocks.detail.mockResolvedValue(tenant);
+    expect(await render(detail(undefined, { diperbarui: "<script>" }))).not.toContain("[Toast:");
+    expect(await render(detail())).not.toContain("[Toast:");
   });
   it("disables status changes for an unknown stored status", async () => {
     mocks.detail.mockResolvedValue({ ...tenant, status: "unknown" });
     const markup = await render(detail());
     expect(markup).not.toContain("[Status:"); expect(markup).toContain("perubahan status dinonaktifkan");
   });
-  it.each([["nama", "Nama usaha diperbarui"], ["status", "Status tenant diperbarui"]])("confirms a %s update from the server-rendered state", async (notice, text) => {
+  it.each([["nama", "Nama usaha diperbarui."], ["status", "Status tenant kini Ditangguhkan."]])("confirms a %s update with a toast built from the stored state", async (notice, text) => {
     mocks.detail.mockResolvedValue({ ...tenant, status: "suspended" });
     const markup = await render(detail(undefined, { diperbarui: notice }));
     expect(markup).toContain(text);
-    if (notice === "status") expect(markup).toContain("Status saat ini: Ditangguhkan");
+    expect(markup).toContain(`[Toast:success:${text}`);
+    // The persistent suspended warning is a banner, not a toast.
+    expect(markup).toContain("tidak dapat mengakses operasional");
   });
   it("detail of an unknown tenant shows not found", async () => {
     mocks.detail.mockResolvedValue(null);

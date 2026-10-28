@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ session: vi.fn(), db: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("../auth-session", () => ({ requireAuthenticatedSession: mocks.session }));
 vi.mock("../mongodb", () => ({ getDb: mocks.db }));
-import { hasPlatformAccess, listAuthorizedWorkspaces, requireLocationContext, requirePlatformAccess, requireTenantContext } from "./authorization";
+import { hasPlatformAccess, listAuthorizedWorkspaces, requireLocationContext, requireOwnerAccount, requirePlatformAccess, requireTenantContext } from "./authorization";
 import { getLocationCollection, getTenantCollection } from "./collections";
 
 // Minimal filter-aware fake: equality, ObjectId equality and $in. Queries that
@@ -146,6 +146,32 @@ describe("location status is enforced on every request of an active session", ()
     setLocation("active");
     signIn(ids.staff);
     await expect(requireLocationContext({ tenantId: hex(ids.t1), locationId: hex(ids.l1) })).resolves.toBeTruthy();
+  });
+});
+
+describe("Owner account gate (change password)", () => {
+  it("allows an active Owner of an active tenant", async () => {
+    signIn(ids.owner);
+    await expect(requireOwnerAccount()).resolves.toBeUndefined();
+  });
+  it.each(["staff", "admin", "platform"] as const)("denies %s accounts", async (who) => {
+    signIn(ids[who]);
+    await expect(requireOwnerAccount()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it("denies an Owner whose only tenants are suspended or archived, and allows again after reactivation", async () => {
+    signIn(ids.owner);
+    const t1 = data.tenants.find((row) => (row._id as ObjectId).equals(ids.t1)) as Row;
+    t1.status = "archived";
+    await expect(requireOwnerAccount()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    t1.status = "active";
+    await expect(requireOwnerAccount()).resolves.toBeUndefined();
+  });
+  it("denies inactive Owner memberships and unauthenticated callers", async () => {
+    (data.memberships.find((row) => (row.userId as ObjectId).equals(ids.owner) && (row.tenantId as ObjectId).equals(ids.t1)) as Row).status = "inactive";
+    signIn(ids.owner);
+    await expect(requireOwnerAccount()).rejects.toMatchObject({ code: "FORBIDDEN" });
+    mocks.session.mockRejectedValue(new AppError("UNAUTHENTICATED"));
+    await expect(requireOwnerAccount()).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   });
 });
 

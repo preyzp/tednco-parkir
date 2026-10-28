@@ -23,6 +23,20 @@
   --input: #cbd5e1;
   --ring: #059669;
   --radius: 0.625rem;
+  /* Feedback (toast) palette: success emerald, error red, warning amber, info blue.
+     Text on its background stays above WCAG AA in both themes. */
+  --toast-success-bg: #ecfdf5;
+  --toast-success-border: #a7f3d0;
+  --toast-success-text: #065f46;
+  --toast-error-bg: #fef2f2;
+  --toast-error-border: #fecaca;
+  --toast-error-text: #991b1b;
+  --toast-warning-bg: #fffbeb;
+  --toast-warning-border: #fde68a;
+  --toast-warning-text: #92400e;
+  --toast-info-bg: #eff6ff;
+  --toast-info-border: #bfdbfe;
+  --toast-info-text: #1e40af;
 }
 
 @theme inline {
@@ -68,6 +82,18 @@
   --destructive: #fca5a5;
   --border: #334155;
   --input: #52647b;
+  --toast-success-bg: #022c22;
+  --toast-success-border: #065f46;
+  --toast-success-text: #a7f3d0;
+  --toast-error-bg: #2a0e0e;
+  --toast-error-border: #7f1d1d;
+  --toast-error-text: #fecaca;
+  --toast-warning-bg: #2a1806;
+  --toast-warning-border: #78350f;
+  --toast-warning-text: #fde68a;
+  --toast-info-bg: #0c1a33;
+  --toast-info-border: #1e3a8a;
+  --toast-info-text: #bfdbfe;
 }
 
 body {

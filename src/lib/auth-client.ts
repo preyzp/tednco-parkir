@@ -2,7 +2,7 @@
 
 import { createAuthClient } from "better-auth/react";
 import { z } from "zod";
-import { loginErrorMessage, type LoginInput } from "./login";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, loginErrorMessage, type LoginInput } from "./login";
 
 // Official Better Auth transport; no alternate session store/token handling.
 const authClient = createAuthClient({
@@ -46,5 +46,36 @@ export async function logoutCurrentSession(): Promise<AuthResult> {
     return { ok: true };
   } catch {
     return { ok: false, message: "Tidak dapat mengakhiri sesi. Periksa koneksi Anda dan coba lagi." };
+  }
+}
+
+export type ChangePasswordResult =
+  | { ok: true }
+  | { ok: false; message: string; field?: "currentPassword" | "newPassword" };
+// The server route returns the app error contract; only allowlisted fields/codes are read.
+const changePasswordErrorSchema = z.object({
+  error: z.object({ fieldErrors: z.array(z.object({ field: z.string(), code: z.string() })).optional() }).optional(),
+}).passthrough();
+export function changePasswordErrorMessage(status: number | undefined, body: unknown): Exclude<ChangePasswordResult, { ok: true }> {
+  const field = changePasswordErrorSchema.safeParse(body).data?.error?.fieldErrors?.[0];
+  if (status === 400 && field?.field === "currentPassword") return { ok: false, field: "currentPassword", message: "Password saat ini salah." };
+  if (status === 400 && field?.field === "newPassword") return { ok: false, field: "newPassword", message: field.code === "INVALID" ? "Password baru harus berbeda dari password saat ini." : `Password baru harus ${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} karakter.` };
+  if (status === 400) return { ok: false, message: "Periksa kembali isian password Anda." };
+  if (status === 401) return { ok: false, message: "Sesi Anda berakhir. Silakan masuk kembali." };
+  if (status === 403) return { ok: false, message: "Fitur ini hanya untuk Owner dengan usaha yang aktif." };
+  if (status === 429) return { ok: false, message: "Terlalu banyak percobaan. Tunggu sebentar, lalu coba lagi." };
+  return { ok: false, message: "Perubahan password belum dapat dikonfirmasi. Coba masuk dengan password lama; jika gagal, gunakan password baru." };
+}
+
+// Official Better Auth changePassword. The server forces revokeOtherSessions and
+// issues a fresh cookie for this browser; passwords never leave the request body.
+export async function changeOwnerPassword(input: { currentPassword: string; newPassword: string }): Promise<ChangePasswordResult> {
+  try {
+    const result = await authClient.changePassword({ currentPassword: input.currentPassword, newPassword: input.newPassword, revokeOtherSessions: true });
+    if (result.error) return changePasswordErrorMessage(result.error.status, result.error);
+    if (!successSchema.safeParse(result.data).success) return changePasswordErrorMessage(503, null);
+    return { ok: true };
+  } catch {
+    return { ok: false, message: "Tidak dapat terhubung. Periksa koneksi Anda dan coba lagi." };
   }
 }

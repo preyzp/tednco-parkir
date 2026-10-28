@@ -26,9 +26,10 @@ export function ThemeSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="h-11 gap-2 px-3" aria-label={`Tema tampilan: ${current.label}`}>
+        {/* Icon-only below `sm` (square 44px target); the accessible name always includes the choice. */}
+        <Button variant="outline" className="size-11 gap-2 px-0 sm:w-auto sm:px-3" aria-label={`Tema tampilan: ${current.label}`}>
           <Icon aria-hidden="true" />
-          <span>{current.label}</span>
+          <span className="hidden sm:inline">{current.label}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">

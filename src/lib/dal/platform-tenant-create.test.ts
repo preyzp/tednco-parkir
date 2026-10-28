@@ -68,7 +68,8 @@ describe("validation and normalization", () => {
     ["locationName", { locationName: "" }],
     ["ownerName", { ownerName: "   " }],
     ["ownerEmail", { ownerEmail: "bukan-email" }],
-    ["ownerPassword", { ownerPassword: "pendek", ownerPasswordConfirm: "pendek" }],
+    ["ownerPassword", { ownerPassword: "abcde", ownerPasswordConfirm: "abcde" }],
+    ["ownerPassword", { ownerPassword: "x".repeat(129), ownerPasswordConfirm: "x".repeat(129) }],
     ["ownerPasswordConfirm", { ownerPasswordConfirm: "berbeda-dari-password" }],
     ["tenantName", { tenantName: undefined }],
   ])("rejects invalid %s with a static message and no write", async (field, change) => {
@@ -78,6 +79,11 @@ describe("validation and normalization", () => {
     expect(message).toBeTruthy();
     for (const value of Object.values(change)) if (typeof value === "string" && value.trim()) expect(message).not.toContain(value);
     expect(mocks.hash).not.toHaveBeenCalled(); expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+  it.each([["exactly 6 characters", "abcdef"], ["a longer password", "a-much-longer-password-1234"], ["exactly 128 characters", "x".repeat(128)]])("accepts an Owner password of %s and hashes it", async (_case, password) => {
+    expect(await createTenantWithOwner({ ...valid(), ownerPassword: password, ownerPasswordConfirm: password })).toMatchObject({ ok: true });
+    expect(mocks.hash).toHaveBeenCalledWith(password);
+    expect(JSON.stringify(data)).not.toContain(password); // only the hash is stored
   });
   it("rejects unknown fields such as a smuggled role", async () => {
     expect(await createTenantWithOwner({ ...valid(), platformRole: "platform_admin" })).toMatchObject({ ok: false, reason: "validation" });

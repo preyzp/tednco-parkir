@@ -8,7 +8,8 @@ import { developmentDatabase } from "./dev-provisioning-core.mjs";
 // and makes the first platform_admin bootstrap one-time.
 const markerId = new ObjectId("000000000000000000000002");
 export const platformAdminConfirmation = "BOOTSTRAP_PLATFORM_ADMIN";
-const inputSchema = z.object({ email: z.email().transform((email) => email.toLowerCase()), password: z.string().min(12).max(128), name: z.string().trim().min(1).max(100) });
+// Password policy mirrors src/lib/login.ts PASSWORD_MIN_LENGTH/PASSWORD_MAX_LENGTH (6–128).
+const inputSchema = z.object({ email: z.email().transform((email) => email.toLowerCase()), password: z.string().min(6).max(128), name: z.string().trim().min(1).max(100) });
 
 /** @param {Record<string, string | undefined>} env @param {string[]} args */
 export function validatePlatformAdminBootstrap(env, args) {
@@ -16,7 +17,7 @@ export function validatePlatformAdminBootstrap(env, args) {
   if (args.some((arg) => arg !== "--apply" && arg !== "--dry-run") || new Set(args).size !== args.length || (args.includes("--apply") && args.includes("--dry-run"))) throw new Error("Use --dry-run (default) or --apply only. Never put credentials in arguments.");
   if (env.MONGODB_DB_NAME !== developmentDatabase) throw new Error("Only the dedicated provisioning development database is allowed.");
   const parsed = inputSchema.safeParse({ email: env.TEDNCO_DEV_PLATFORM_ADMIN_EMAIL?.trim(), password: env.TEDNCO_DEV_PLATFORM_ADMIN_PASSWORD, name: env.TEDNCO_DEV_PLATFORM_ADMIN_NAME ?? "Platform Admin Pengembangan" });
-  if (!parsed.success) throw new Error("Provide a valid email and a password of 12-128 characters through runtime environment variables.");
+  if (!parsed.success) throw new Error("Provide a valid email and a password of 6-128 characters through runtime environment variables.");
   const apply = args.includes("--apply");
   // A separate confirmation value so the Owner workflow's variable can never trigger this write.
   if (apply && env.TEDNCO_DEV_WRITE_CONFIRMATION !== platformAdminConfirmation) throw new Error("Explicit platform admin write confirmation is required.");

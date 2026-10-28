@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { tenantTimezones } from "../platform-labels";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../login";
 export const createTenantFields = ["tenantName", "slug", "timezone", "locationName", "locationAddress", "ownerName", "ownerEmail", "ownerPassword", "ownerPasswordConfirm"] as const;
 export type CreateTenantField = (typeof createTenantFields)[number];
 
@@ -44,7 +45,7 @@ export const createTenantSchema = z.object({
   ownerName: z.string().trim().min(1, "Masukkan nama Owner.").max(100, "Nama Owner maksimal 100 karakter."),
   ownerEmail: z.string().trim().toLowerCase().min(1, "Masukkan email Owner.").max(254, "Email terlalu panjang.").pipe(z.email({ error: "Masukkan alamat email yang valid." })),
   // Same policy as the provisioning scripts; sign-in accepts up to 128.
-  ownerPassword: z.string().min(12, "Password minimal 12 karakter.").max(128, "Password maksimal 128 karakter."),
+  ownerPassword: z.string().min(PASSWORD_MIN_LENGTH, `Password minimal ${PASSWORD_MIN_LENGTH} karakter.`).max(PASSWORD_MAX_LENGTH, `Password maksimal ${PASSWORD_MAX_LENGTH} karakter.`),
   ownerPasswordConfirm: z.string(),
 }).strict().refine((value) => value.ownerPassword === value.ownerPasswordConfirm, { path: ["ownerPasswordConfirm"], message: "Konfirmasi password tidak sama." });
 export type CreateTenantInput = z.infer<typeof createTenantSchema>;

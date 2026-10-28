@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "../components/theme-provider";
+import { Toaster } from "../components/ui/sonner";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,7 +27,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col"><ThemeProvider>{children}</ThemeProvider></body>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider>
+          {children}
+          {/* One global toaster for login, Owner App and Platform Admin; follows the active theme. */}
+          <Toaster position="top-center" closeButton containerAriaLabel="Notifikasi" toastOptions={{ closeButtonAriaLabel: "Tutup notifikasi" }} />
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

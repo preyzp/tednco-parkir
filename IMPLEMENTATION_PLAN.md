@@ -178,7 +178,7 @@ database, not development/production. See HANDOFF.md for evidence and limits.
 - [ ] P2.2 — Implementasi login (P2.2A backend/session integration selesai offline; UI P2.2B belum).
 - [x] P2.3 — Implementasi logout (acceptance offline lulus 2026-10-26: redirect /app setelah logout, replay cookie lama ditolak, logout tanpa sesi idempotent, revocation check gagal = 503; Better Auth asli dengan persistence sintetis, tanpa Atlas. Uji browser manual dengan akun nyata masih tertunda provisioning).
 - [ ] P2.4 — Implementasi secure session handling.
-- [ ] P2.5 — Implementasi password reset.
+- [ ] P2.5 — Implementasi password reset. (Bagian ganti password oleh Owner yang login selesai sebagai P4.1 label operator, 2026-10-26: `/app/pengaturan/keamanan`, Better Auth `changePassword` resmi via route auth, verifikasi password saat ini, kebijakan 6–128 (diubah dari 12 atas keputusan operator, termasuk konfigurasi Better Auth), cabut semua sesi lain dan terbitkan cookie baru, toast Sonner, rate limit bawaan 3/10 detik terbukti regression test; offline teruji, uji manual menunggu. Reset via email belum — butuh penyedia email.)
 - [ ] P2.6 — Implementasi users dan tenant memberships.
 - [ ] P2.7 — Implementasi active tenant context (fondasi + pemilihan tenant:lokasi tersedia via P2.3A/P2.10; review lifecycle membership/role change tetap terbuka).
 - [ ] P2.8 — Implementasi location authorization (guard server P2.3A + picker P2.10 tersedia; enforcement per fitur bisnis menyusul).
@@ -232,13 +232,13 @@ Satu user dapat memiliki membership dan role berbeda pada tenant berbeda.
 - [ ] P3.1 — Setup design tokens.
 - [ ] P3.2 — Integrasi Inter.
 - [ ] P3.3 — Implementasi Button, Input, Select, Badge.
-- [ ] P3.4 — Implementasi Card, Dialog, dan feedback components.
-- [ ] P3.5 — Implementasi desktop sidebar.
-- [ ] P3.6 — Implementasi mobile navigation.
-- [ ] P3.7 — Implementasi page header.
-- [ ] P3.8 — Implementasi active location selector.
+- [ ] P3.4 — Implementasi Card, Dialog, dan feedback components. (Toast global Sonner/shadcn ditambahkan 2026-10-26: Toaster di root layout, FlashToast anti-duplikasi setelah redirect, migrasi feedback Tenant Management dan ganti password; error di dalam dialog tetap inline demi aksesibilitas.)
+- [x] P3.5 — Implementasi desktop sidebar. (P4.2 label operator, 2026-10-26: Owner App shell.)
+- [x] P3.6 — Implementasi mobile navigation. (Sheet drawer.)
+- [x] P3.7 — Implementasi page header. (Lokasi aktif, ganti lokasi, tema, profil.)
+- [x] P3.8 — Implementasi active location selector. (Integrasi picker P2.10 di header/sidebar.)
 - [ ] P3.9 — Implementasi loading/empty/error states.
-- [ ] P3.10 — Implementasi dashboard shell.
+- [x] P3.10 — Implementasi dashboard shell. (4 KPI dengan empty state jujur sampai modul operasional tersedia; aktivitas terbaru kosong; aksi cepat Kendaraan Masuk nonaktif + penjelasan. Uji manual menunggu.)
 - [ ] P3.11 — Tambahkan responsive dan accessibility checks.
 
 #### Definition of Done
@@ -260,15 +260,15 @@ Satu user dapat memiliki membership dan role berbeda pada tenant berbeda.
 
 #### Tasks
 
-- [ ] P4.1 — Implementasi vehicle validation.
-- [ ] P4.2 — Implementasi plate normalization.
-- [ ] P4.3 — Implementasi reusable vehicle records.
-- [ ] P4.4 — Implementasi create parking session.
-- [ ] P4.5 — Implementasi duplicate active session prevention.
-- [ ] P4.6 — Implementasi vehicle entry form.
-- [ ] P4.7 — Implementasi active parking list.
-- [ ] P4.8 — Implementasi partial plate search.
-- [ ] P4.9 — Implementasi vehicle type filter.
+- [x] P4.1 — Implementasi vehicle validation. (Kendaraan Masuk "P4.3" label operator, 2026-10-26, offline.)
+- [x] P4.2 — Implementasi plate normalization. (displayPlate + normalizePlate.)
+- [x] P4.3 — Implementasi reusable vehicle records. (Reuse kendaraan tenant per normalizedPlate.)
+- [x] P4.4 — Implementasi create parking session. (Owner-only; entryAt server; transaksi.)
+- [x] P4.5 — Implementasi duplicate active session prevention. (Unique partial index + fail-closed bila index belum ada; **index belum dibuat di Atlas — menunggu APPLY operator**.)
+- [x] P4.6 — Implementasi vehicle entry form. (Uji manual menunggu index.)
+- [x] P4.7 — Implementasi active parking list. (P4.4 label operator, 2026-10-27: `/app/kendaraan`, filter status default Parkir Aktif, pagination server-side, tabel/kartu, Owner-only.)
+- [x] P4.8 — Implementasi partial plate search.
+- [x] P4.9 — Implementasi vehicle type filter. (Uji manual menunggu index P4.3 di Atlas.)
 - [ ] P4.10 — Implementasi active session detail.
 - [ ] P4.11 — Implementasi edit active vehicle details.
 - [ ] P4.12 — Implementasi cancellation with reason.
@@ -305,19 +305,19 @@ Satu user dapat memiliki membership dan role berbeda pada tenant berbeda.
 #### Tasks
 
 - [ ] P5.1 — Implementasi tariff configuration.
-- [ ] P5.2 — Implementasi tariff lookup per lokasi/jenis kendaraan.
-- [ ] P5.3 — Implementasi regular fee calculation.
-- [ ] P5.4 — Implementasi overnight fee calculation.
-- [ ] P5.5 — Implementasi checkout preview.
-- [ ] P5.6 — Implementasi Cash payment confirmation.
+- [x] P5.2 — Implementasi tariff lookup per lokasi/jenis kendaraan. (P4.5 label operator, 2026-10-27: tarif aktif lokasi bila ada; jika tidak ada, kebijakan default yang disetujui operator; lebih dari satu tarif aktif → checkout diblokir.)
+- [x] P5.3 — Implementasi regular fee calculation. (`src/lib/parking-tariff.ts`, pure + tes.)
+- [x] P5.4 — Implementasi overnight fee calculation. (Saran jumlah malam dari jam tutup 00.00 zona lokasi; Owner tetap memilih eksplisit.)
+- [x] P5.5 — Implementasi checkout preview.
+- [x] P5.6 — Implementasi Cash payment confirmation. (Owner-only, tanpa input uang diterima.)
 - [ ] P5.7 — Implementasi manual QRIS confirmation.
-- [ ] P5.8 — Implementasi transaction snapshots.
-- [ ] P5.9 — Implementasi atomic checkout persistence.
-- [ ] P5.10 — Implementasi idempotency and duplicate prevention.
+- [x] P5.8 — Implementasi transaction snapshots.
+- [x] P5.9 — Implementasi atomic checkout persistence. (Index parkingTransactions diterapkan 2026-10-27 atas persetujuan operator; 10/10 index terverifikasi read-only.)
+- [x] P5.10 — Implementasi idempotency and duplicate prevention.
 - [ ] P5.11 — Implementasi parking history.
 - [ ] P5.12 — Implementasi transaction detail.
 - [ ] P5.13 — Implementasi audited completed transaction correction.
-- [ ] P5.14 — Tambahkan checkout dan concurrency tests.
+- [x] P5.14 — Tambahkan checkout dan concurrency tests. (Index sudah diterapkan; uji manual checkout Tunai PASS 2026-10-28, terverifikasi read-only 6/6.)
 
 #### Important Rules
 

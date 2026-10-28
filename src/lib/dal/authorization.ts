@@ -122,6 +122,19 @@ export async function listAuthorizedWorkspaces(): Promise<{ userId: string; work
 export async function requirePlatformAccess(): Promise<void> {
   return boundary(async () => { const { user } = await identity(); if (user.platformRole !== "platform_admin") deny(); });
 }
+// Account-level Owner gate (e.g. changing one's own password): the verified
+// user must hold an active Owner membership of at least one ACTIVE tenant.
+// Grants no tenant/location context and reveals no tenant data.
+export async function requireOwnerAccount(): Promise<void> {
+  return boundary(async () => {
+    const { userId, db } = await identity();
+    const rows = await db.collection<Membership>("memberships").find({ userId, role: "owner", status: "active" }, { projection: { _id: 1, userId: 1, tenantId: 1, status: 1, role: 1, locationIds: 1, permissions: 1 } }).limit(maxMemberships).toArray();
+    const tenantIds = rows.flatMap((row) => { const checked = membershipSchema.safeParse(row); return checked.success && checked.data.role === "owner" && same(checked.data.userId, userId) ? [checked.data.tenantId] : []; });
+    if (tenantIds.length === 0) deny();
+    const tenant = await db.collection<Tenant>("tenants").findOne({ _id: { $in: tenantIds }, status: "active" }, { projection: { _id: 1, status: 1 } });
+    if (!tenant || tenant.status !== "active") deny();
+  });
+}
 // Same check as requirePlatformAccess, returning the verified actor for audit
 // records of platform mutations. Never accept an actor id from the caller.
 export async function requirePlatformActor(): Promise<{ readonly userId: ObjectId }> {

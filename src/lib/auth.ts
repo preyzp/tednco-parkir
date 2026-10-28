@@ -6,6 +6,7 @@ import { ObjectId, type Db, type MongoClient } from "mongodb";
 import { getAuthEnv } from "./env";
 import { getDb, getMongoClient } from "./mongodb";
 import { authCollectionNames, authSchemaOptions } from "./auth-schema";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "./login";
 import type { User } from "../types";
 
 function createAuth(db: Db, client: MongoClient, env: ReturnType<typeof getAuthEnv>) {
@@ -17,7 +18,8 @@ function createAuth(db: Db, client: MongoClient, env: ReturnType<typeof getAuthE
     secret: env.BETTER_AUTH_SECRET,
     trustedOrigins: [env.BETTER_AUTH_URL],
     database: mongodbAdapter(db, { client, transaction: true }),
-    emailAndPassword: { enabled: true, disableSignUp: true, revokeSessionsOnPasswordReset: true },
+    // Explicit app policy (6–128); Better Auth would otherwise default to 8.
+    emailAndPassword: { enabled: true, disableSignUp: true, revokeSessionsOnPasswordReset: true, minPasswordLength: PASSWORD_MIN_LENGTH, maxPasswordLength: PASSWORD_MAX_LENGTH },
     advanced: {
       disableOriginCheck: false,
       disableCSRFCheck: false,

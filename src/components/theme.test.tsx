@@ -30,6 +30,16 @@ it("server render and first client render show System to avoid hydration mismatc
   expect(html).not.toContain("Gelap");
 });
 
+it("is icon-only on mobile (label from sm up) while keeping a 44px target and a full accessible name", () => {
+  render(<ThemeProvider><ThemeSwitcher /></ThemeProvider>);
+  const button = trigger();
+  expect(button.className).toMatch(/\bsize-11\b/);
+  expect(button.className).toMatch(/\bsm:w-auto\b/);
+  expect(button.querySelector("svg")).not.toBeNull();
+  expect(button.querySelector("span")!.className).toBe("hidden sm:inline");
+  expect(button.getAttribute("aria-label")).toBe("Tema tampilan: Sistem");
+});
+
 it("defaults to System and follows OS light/dark changes", async () => {
   render(<ThemeProvider><ThemeSwitcher /></ThemeProvider>);
   expect(trigger().getAttribute("aria-label")).toBe("Tema tampilan: Sistem");

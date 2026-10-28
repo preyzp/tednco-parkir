@@ -6,14 +6,15 @@ import { hashPassword } from "better-auth/crypto";
 export const developmentDatabase = "tednco_parkir_provision_dev";
 const markerId = new ObjectId("000000000000000000000001");
 const slug = "tednco-dev-provision";
-const inputSchema = z.object({ email: z.email().transform((email) => email.toLowerCase()), password: z.string().min(12).max(128), name: z.string().trim().min(1).max(100) });
+// Password policy mirrors src/lib/login.ts PASSWORD_MIN_LENGTH/PASSWORD_MAX_LENGTH (6–128).
+const inputSchema = z.object({ email: z.email().transform((email) => email.toLowerCase()), password: z.string().min(6).max(128), name: z.string().trim().min(1).max(100) });
 /** @param {Record<string, string | undefined>} env @param {string[]} args */
 export function validateProvisioning(env, args) {
   if (env.NODE_ENV !== "development" || env.TEDNCO_ENABLE_DEV_PROVISIONING !== "1") throw new Error("Development provisioning is not enabled.");
   if (args.some((arg) => arg !== "--apply" && arg !== "--dry-run") || new Set(args).size !== args.length || (args.includes("--apply") && args.includes("--dry-run"))) throw new Error("Use --dry-run (default) or --apply only. Never put credentials in arguments.");
   if (env.MONGODB_DB_NAME !== developmentDatabase) throw new Error("Only the dedicated provisioning development database is allowed.");
   const parsed = inputSchema.safeParse({ email: env.TEDNCO_DEV_OWNER_EMAIL?.trim(), password: env.TEDNCO_DEV_OWNER_PASSWORD, name: env.TEDNCO_DEV_OWNER_NAME ?? "Owner Pengembangan" });
-  if (!parsed.success) throw new Error("Provide a valid email and a password of 12-128 characters through runtime environment variables.");
+  if (!parsed.success) throw new Error("Provide a valid email and a password of 6-128 characters through runtime environment variables.");
   const apply = args.includes("--apply");
   if (apply && env.TEDNCO_DEV_WRITE_CONFIRMATION !== "PROVISION_DEVELOPMENT_DATABASE") throw new Error("Explicit development write confirmation is required.");
   if (apply && (!env.MONGODB_URI || !/^mongodb(?:\+srv)?:\/\//.test(env.MONGODB_URI))) throw new Error("A MongoDB connection is required for apply mode.");

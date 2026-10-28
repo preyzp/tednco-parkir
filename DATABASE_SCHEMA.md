@@ -511,6 +511,12 @@ Jika kebutuhan masa depan mengharuskan beberapa percobaan pembayaran per sesi, p
 
 Jangan mengizinkan beberapa transaksi `completed` untuk satu sesi.
 
+Implementasi P4.5 (2026-10-27, checkout Tunai Owner):
+
+- Field tambahan: `idempotencyKey` (UUID dari layar checkout; retry identik oleh aktor yang sama mengembalikan hasil sebelumnya) dan `tariffSnapshot.source` (`"location"` | `"default"`). Pengamanan setara koleksi `idempotencyKeys` untuk operasi ini: satu sesi hanya dapat diselesaikan sekali, sehingga key cukup disimpan pada dokumen transaksi final.
+- Satu transaksi MongoDB: insert transaksi `completed` + update bersyarat sesi (`status: "active"` → `completed`, `exitAt`, `completedBy`, `transactionId`) + audit `parking.checkout`. Checkout ditolak (fail closed) sampai unique partial index `{ tenantId, parkingSessionId }` (`status: "completed"`) tersedia.
+- MVP tunai: `amountDue = amountPaid = total`; `cashReceived`/`changeAmount` tidak diisi.
+
 ---
 
 ## 12. prepaidAccounts
