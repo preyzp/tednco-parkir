@@ -84,7 +84,7 @@ function EntryForm({ onRecorded }: { onRecorded: (entry: NonNullable<VehicleEntr
     submitting.current = true;
   }
   const typeOption = (value: "motor" | "mobil", icon: ReactNode) => (
-    <Label htmlFor={`vehicle-type-${value}`} className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent">
+    <Label htmlFor={`vehicle-type-${value}`} className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border p-3 has-data-[state=checked]:border-primary has-data-[state=checked]:bg-accent">
       <RadioGroupItem id={`vehicle-type-${value}`} value={value} disabled={pending} />
       {icon}<span className="text-base font-medium">{vehicleTypeLabels[value]}</span>
     </Label>

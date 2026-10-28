@@ -79,7 +79,7 @@ export function CheckoutForm({ quote, backHref }: { quote: CheckoutQuote; backHr
   }
 
   const option = (value: TariffChoice, icon: ReactNode, title: string, detail: string) => (
-    <Label htmlFor={`tariff-${value}`} className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border p-3 has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-accent">
+    <Label htmlFor={`tariff-${value}`} className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border p-3 has-data-[state=checked]:border-primary has-data-[state=checked]:bg-accent">
       <RadioGroupItem id={`tariff-${value}`} value={value} disabled={pending} />
       {icon}<span className="min-w-0"><span className="block text-base font-medium">{title}</span><span className="block text-xs font-normal text-muted-foreground">{detail}</span></span>
     </Label>
