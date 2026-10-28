@@ -1,4 +1,4 @@
-import { MongoServerError, ObjectId } from "mongodb";
+import { MongoNetworkError, MongoOperationTimeoutError, MongoServerError, ObjectId } from "mongodb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../errors";
 const mocks = vi.hoisted(() => ({ guard: vi.fn(), db: vi.fn(), client: vi.fn() }));
@@ -20,7 +20,11 @@ const matches = (row: Row, filter: Row) => Object.entries(filter).every(([key, e
 });
 const project = (row: Row, projection?: Row) => (projection ? Object.fromEntries([...new Set(["_id", ...Object.keys(projection)])].filter((key) => key in row).map((key) => [key, row[key]])) : row);
 type Write = { kind: "insert"; name: string; doc: Row } | { kind: "update"; row: Row; before: Row };
-type FakeSession = { writes: Write[]; withTransaction: (work: () => Promise<void>) => Promise<void>; endSession: () => Promise<void> };
+type FakeSession = { writes: Write[]; withTransaction: (work: () => Promise<void>, options?: unknown) => Promise<void>; endSession: () => Promise<void> };
+// P4.7: a failing index check and a commit that fails without committing.
+let indexError: Error | undefined;
+let commitError: Error | undefined;
+let transactionOptions: unknown[] = [];
 let data: Record<string, Row[]>;
 let indexes: Record<string, Row[]>;
 let barrier: { collection: string; waiting: number; release?: () => void; gate?: Promise<void> } | undefined;
@@ -44,7 +48,7 @@ const fakeDb = { collection: (name: string) => ({
     return cursor;
   },
   countDocuments: async (filter: Row) => (data[name] ??= []).filter((item) => matches(item, filter)).length,
-  listIndexes: () => ({ toArray: async () => { if (!indexes[name]) throw new MongoServerError({ message: "ns not found", code: 26 }); return indexes[name]; } }),
+  listIndexes: () => ({ toArray: async () => { if (indexError) throw indexError; if (!indexes[name]) throw new MongoServerError({ message: "ns not found", code: 26 }); return indexes[name]; } }),
   insertOne: async (doc: Row, options: { session: FakeSession }) => {
     if (failInsert === name) throw new Error("synthetic secret storage failure");
     const rows = (data[name] ??= []);
@@ -63,15 +67,17 @@ const fakeDb = { collection: (name: string) => ({
 function newSession(): FakeSession {
   const session: FakeSession = {
     writes: [],
-    withTransaction: async (work) => {
-      try { await work(); } catch (error) {
+    withTransaction: async (work, options) => {
+      transactionOptions.push(options);
+      const rollback = () => {
         for (const write of session.writes.reverse()) {
           if (write.kind === "insert") data[write.name] = data[write.name].filter((row) => row !== write.doc);
           else { for (const key of Object.keys(write.row)) delete write.row[key]; Object.assign(write.row, write.before); }
         }
         session.writes = [];
-        throw error;
-      }
+      };
+      try { await work(); } catch (error) { rollback(); throw error; }
+      if (commitError) { rollback(); throw commitError; }
       if (loseCommitReply) throw new MongoServerError({ message: "connection lost after commit", errorLabels: ["UnknownTransactionCommitResult"] });
     },
     endSession: async () => {},
@@ -101,6 +107,7 @@ const checkout = (id: ObjectId, raw: Row) => completeParkingCheckout(selection, 
 beforeEach(() => {
   vi.resetAllMocks(); resetTariffIndexCacheForTests(); resetCheckoutIndexCacheForTests();
   barrier = undefined; failInsert = undefined; loseCommitReply = false; afterTariffRead = undefined;
+  indexError = undefined; commitError = undefined; transactionOptions = [];
   mocks.guard.mockResolvedValue(ownerContext());
   mocks.db.mockResolvedValue(fakeDb);
   mocks.client.mockResolvedValue({ startSession: newSession });
@@ -231,6 +238,61 @@ describe("atomic save", () => {
     indexes.tariffs = [{ name: activeTariffIndex.name, key: activeTariffIndex.key, unique: true }]; // not partial: wrong
     expect(await save()).toEqual({ ok: false, reason: "not_ready" });
     nothingWritten();
+  });
+});
+
+describe("connection failures (P4.7)", () => {
+  // Safe operational log (P4.7 C): exactly one line per outage, no secrets.
+  const logLines = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
+  it("the settings page read logs a storage failure once (settings.read); FORBIDDEN is not logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.db.mockResolvedValueOnce({ ...fakeDb, collection: (name: string) => ({ ...fakeDb.collection(name), countDocuments: async () => { throw new MongoNetworkError("synthetic secret host"); } }) });
+    await expect(getLocationSettings(selection)).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    data.locations[0].status = "inactive";
+    await expect(getLocationSettings(selection)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(logLines(spy)).toEqual([expect.objectContaining({ operation: "settings.read", outcome: "unavailable", category: "network" })]);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/synthetic|Lokasi Utara/);
+    spy.mockRestore();
+  });
+  it("logs a transaction timeout once (outcome unknown) without tariff values or ids; conflicts are not logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const timeout = new MongoOperationTimeoutError("synthetic secret Timed out");
+    timeout.addErrorLabel("TransientTransactionError");
+    commitError = timeout;
+    await save().catch(() => undefined);
+    commitError = undefined;
+    await save({ expectedRevision: 7 });
+    expect(logLines(spy)).toEqual([expect.objectContaining({ operation: "location.settings.update", outcome: "unknown", category: "timeout", labels: ["TransientTransactionError"] })]);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(new RegExp(["synthetic", "2000", "12000", l1.toHexString(), t1.toHexString()].join("|")));
+    spy.mockRestore();
+  });
+  it("bounds the whole transaction with the driver deadline (20 s), keeping snapshot/majority/primary", async () => {
+    expect(await save()).toMatchObject({ ok: true });
+    expect(transactionOptions).toEqual([{ readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary", timeoutMS: 20_000 }]);
+  });
+  it("a failed index check (network) is unavailable, not not_ready, and is not cached", async () => {
+    indexError = new MongoNetworkError("synthetic secret host");
+    const error = await save().then(() => undefined, (caught: AppError) => caught);
+    expect(error).toMatchObject({ code: "SERVICE_UNAVAILABLE" }); expect(error?.message).not.toContain("synthetic");
+    nothingWritten();
+    indexError = undefined;
+    expect(await save()).toMatchObject({ ok: true });
+  });
+  it("a transaction timeout is unknown with nothing written; the reload-then-save path still works", async () => {
+    const timeout = new MongoOperationTimeoutError("synthetic secret Timed out during withTransaction");
+    timeout.addErrorLabel("TransientTransactionError");
+    commitError = timeout;
+    await expect(save()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    nothingWritten();
+    commitError = undefined;
+    expect(await save()).toMatchObject({ ok: true, settings: { revision: 1 } });
+  });
+  it("after an ambiguous commit that did persist, a retry on the old revision conflicts instead of writing twice", async () => {
+    loseCommitReply = true;
+    await expect(save()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    loseCommitReply = false;
+    expect(await save()).toEqual({ ok: false, reason: "conflict" });
+    expect(data.auditLogs).toHaveLength(1); expect(location().settingsRevision).toBe(1);
   });
 });
 

@@ -2,9 +2,12 @@ import "server-only";
 import { MongoServerError, ObjectId, type ClientSession, type Db } from "mongodb";
 import { getDb, getMongoClient } from "../mongodb";
 import { AppError } from "../errors";
+import { logOperationalError } from "../log";
 import { defaultParkingPolicy, isTariffAmount, resolveOperatingPolicy, type OperatingPolicy, type RateSource } from "../parking-tariff";
 import { locationSettingsSchema } from "../validations/location-settings";
 import { requirePermission, type AuthorizationSelection, type LocationContext } from "./authorization";
+import { hasUniquePartialIndex } from "./index-verification";
+import { transactionOptions } from "./transaction-options";
 import type { TariffType, VehicleType } from "../../types";
 
 // Owner location settings (P4.6): four tariffs (Motor/Mobil × Reguler/Menginap)
@@ -15,7 +18,6 @@ import type { TariffType, VehicleType } from "../../types";
 
 const vehicleTypes = ["motor", "mobil"] as const satisfies readonly VehicleType[];
 const tariffTypes = ["regular", "overnight"] as const satisfies readonly TariffType[];
-type Rates = { readonly regular: number; readonly overnight: number };
 export interface LocationSettingsView {
   readonly locationName: string;
   readonly revision: number;
@@ -34,23 +36,15 @@ export type LocationSettingsResult =
 // closed until it exists, like the parking indexes.
 export const activeTariffIndex = { name: "tariffs_location_vehicle_tariff_active_unique", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }, partialFilterExpression: { status: "active" } } as const;
 let activeTariffIndexVerified = false;
+// Throws AppError SERVICE_UNAVAILABLE when the check itself fails (not cached).
 async function hasActiveTariffIndex(db: Db): Promise<boolean> {
-  if (activeTariffIndexVerified) return true;
-  try {
-    const indexes = await db.collection("tariffs").listIndexes().toArray();
-    activeTariffIndexVerified = indexes.some((index) => index.unique === true && !index.sparse && !index.collation
-      && JSON.stringify(index.key) === JSON.stringify(activeTariffIndex.key)
-      && JSON.stringify(index.partialFilterExpression) === JSON.stringify(activeTariffIndex.partialFilterExpression));
-  } catch {
-    activeTariffIndexVerified = false; // e.g. NamespaceNotFound before the migration
-  }
+  if (!activeTariffIndexVerified) activeTariffIndexVerified = await hasUniquePartialIndex(db, "tariffs", activeTariffIndex);
   return activeTariffIndexVerified;
 }
 /** Test hook: forget the cached index verification. */
 export function resetTariffIndexCacheForTests(): void { activeTariffIndexVerified = false; }
 
 type Options = { session?: ClientSession };
-const transactionOptions = { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary" } as const;
 class Conflict extends Error {}
 
 // Owner-only (Admin/Staff settings are out of scope); needs both grants.
@@ -98,6 +92,7 @@ export async function getLocationSettings(selection: AuthorizationSelection): Pr
     return Object.freeze({ locationName: location.name, revision: location.revision, tariffs, operatingHours: resolveOperatingPolicy(location), tariffsConsistent: consistent, activeVehicleCount });
   } catch (error) {
     if (error instanceof AppError) throw error;
+    logOperationalError("settings.read", error, { outcome: "unavailable", phase: "read" });
     throw new AppError("SERVICE_UNAVAILABLE");
   }
 }
@@ -171,7 +166,9 @@ export async function updateLocationSettings(selection: AuthorizationSelection, 
     // A concurrent save that won the unique tariff index.
     if (error instanceof MongoServerError && error.code === 11000) return { ok: false, reason: "conflict" };
     if (error instanceof AppError) throw error;
-    // Includes ambiguous commits: callers must reload before retrying.
+    // Includes ambiguous commits and transaction timeouts: callers must reload
+    // before retrying (a retry on the old revision can only conflict).
+    logOperationalError("location.settings.update", error, { outcome: "unknown", phase: "transaction" });
     throw new AppError("SERVICE_UNAVAILABLE");
   } finally {
     await session?.endSession().catch(() => {});

@@ -8,11 +8,15 @@ import { resolveActiveWorkspace } from "./workspace";
 import type { VehicleType } from "../types";
 
 export interface VehicleEntryFormState {
-  readonly status: "idle" | "error" | "success";
+  // "unknown": the server could not confirm whether the entry was committed.
+  // The caller must check the vehicle list before retrying.
+  readonly status: "idle" | "error" | "success" | "unknown";
   readonly message?: string;
   readonly fieldErrors?: Partial<Record<"plateNumber" | "vehicleType" | "notes", string>>;
   readonly entry?: { readonly plateNumber: string; readonly vehicleType: VehicleType; readonly entryAt: string; readonly timeZone: string; readonly locationName: string };
 }
+
+const entryUnavailableMessage = "Kendaraan belum dicatat karena server data tidak dapat dihubungi. Periksa koneksi, lalu coba lagi.";
 
 // Public endpoint. The target location is the server-validated active
 // workspace (never a form field); recordVehicleEntry re-checks session, Owner
@@ -21,18 +25,24 @@ export async function recordVehicleEntryAction(_previous: VehicleEntryFormState,
   const read = (field: string) => { const value = formData.get(field); return typeof value === "string" ? value : undefined; };
   const raw = { plateNumber: read("plateNumber"), vehicleType: read("vehicleType") || undefined, notes: read("notes") };
   let unauthenticated = false;
+  let attempted = false;
   try {
     const workspace = await resolveActiveWorkspace();
     if (workspace.status !== "active") return { status: "error", message: "Pilih lokasi aktif terlebih dahulu, lalu coba lagi." };
+    attempted = true;
     const result = await recordVehicleEntry({ tenantId: workspace.workspace.tenantId, locationId: workspace.workspace.locationId }, raw);
     if (result.ok) return { status: "success", entry: result.entry };
     if (result.reason === "validation") return { status: "error", message: "Periksa kembali isian yang ditandai.", fieldErrors: result.fieldErrors };
     if (result.reason === "duplicate_active") return { status: "error", message: "Kendaraan ini masih tercatat parkir di lokasi ini.", fieldErrors: { plateNumber: "Nomor polisi ini sudah memiliki sesi parkir aktif di lokasi ini." } };
+    if (result.reason === "unavailable") return { status: "error", message: entryUnavailableMessage };
     return { status: "error", message: "Pencatatan kendaraan belum siap di server. Hubungi pengelola platform." };
   } catch (error) {
     unauthenticated = error instanceof AppError && error.code === "UNAUTHENTICATED";
     if (!unauthenticated && error instanceof AppError && error.code === "FORBIDDEN") return { status: "error", message: "Anda tidak memiliki akses untuk mencatat kendaraan di lokasi ini." };
-    if (!unauthenticated) return { status: "error", message: "Kendaraan belum dapat dicatat. Periksa dashboard sebelum mencoba lagi agar tidak tercatat ganda." };
+    // resolveActiveWorkspace fails before anything is written: a definite failure.
+    if (!unauthenticated && !attempted) return { status: "error", message: entryUnavailableMessage };
+    // The commit may have succeeded: never say "not recorded".
+    if (!unauthenticated) return { status: "unknown", message: "Status pencatatan belum dapat dipastikan. Periksa daftar kendaraan sebelum mencoba lagi agar tidak tercatat ganda." };
   }
   redirect(LOGIN_PATH);
 }

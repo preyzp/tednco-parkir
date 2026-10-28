@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Dialog/typing-heavy jsdom form: generous limits for loaded parallel runs (logic unchanged).
 vi.setConfig({ testTimeout: 20_000 });
@@ -158,6 +158,25 @@ describe("saving", () => {
     render(<LocationSettingsForm settings={configured} />);
     type("Motor Reguler", "3000"); fireEvent.click(submit());
     expect(await screen.findByText("Status penyimpanan belum pasti")).toBeTruthy();
+    expect(mocks.success).not.toHaveBeenCalled();
+  });
+});
+
+describe("slow server (P4.7)", () => {
+  afterEach(() => vi.useRealTimers());
+  it("after 10 s shows a still-processing hint (no resubmit advice); it disappears with the reply", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = deferred<unknown>();
+    mocks.save.mockReturnValue(pending.promise);
+    render(<LocationSettingsForm settings={configured} />);
+    type("Motor Reguler", "2.500"); fireEvent.click(submit());
+    await act(async () => {});
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(screen.getByText(/Server masih memproses/).textContent).not.toMatch(/coba lagi|ulangi/i);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve({ status: "unknown", message: "Pengaturan belum dapat dipastikan." }); });
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
     expect(mocks.success).not.toHaveBeenCalled();
   });
 });

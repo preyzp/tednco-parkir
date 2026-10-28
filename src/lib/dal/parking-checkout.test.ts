@@ -1,4 +1,4 @@
-import { MongoServerError, ObjectId } from "mongodb";
+import { MongoNetworkError, MongoOperationTimeoutError, MongoServerError, ObjectId } from "mongodb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../errors";
 const mocks = vi.hoisted(() => ({ guard: vi.fn(), db: vi.fn(), client: vi.fn() }));
@@ -16,15 +16,22 @@ const equal = (a: unknown, b: unknown) => (a instanceof ObjectId && b instanceof
 const matches = (row: Row, filter: Row) => Object.entries(filter).every(([key, expected]) => equal(row[key], expected));
 const project = (row: Row, projection?: Row) => (projection ? Object.fromEntries([...new Set(["_id", ...Object.keys(projection)])].filter((key) => key in row).map((key) => [key, row[key]])) : row);
 type Write = { kind: "insert"; name: string; doc: Row } | { kind: "update"; row: Row; before: Row };
-type FakeSession = { writes: Write[]; withTransaction: (work: () => Promise<void>) => Promise<void>; endSession: () => Promise<void> };
+type FakeSession = { writes: Write[]; withTransaction: (work: () => Promise<void>, options?: unknown) => Promise<void>; endSession: () => Promise<void> };
 let data: Record<string, Row[]>;
 let indexes: Row[] | "missing";
 let barrier: { waiting: number; release?: () => void; gate?: Promise<void> } | undefined;
 let failInsert: string | undefined;
 let loseCommitReply = false;
 let beforeUpdate: (() => void) | undefined;
+// P4.7 connection failures: the index check, reads outside the transaction
+// (the post-failure lookup) and a commit that fails without committing.
+let indexError: Error | undefined;
+let failReadsOutsideTransaction = false;
+let commitError: Error | undefined;
+let transactionOptions: unknown[];
 const fakeDb = { collection: (name: string) => ({
   findOne: async (filter: Row, options: { projection?: Row; session?: FakeSession } = {}) => {
+    if (failReadsOutsideTransaction && !options.session) throw new MongoNetworkError("synthetic secret lookup failed");
     if (name === "parkingSessions" && options.session && barrier) { barrier.waiting++; if (barrier.waiting >= 2) barrier.release?.(); await barrier.gate; }
     const row = (data[name] ??= []).find((item) => matches(item, filter));
     return row ? project(row, options.projection) : null;
@@ -34,7 +41,7 @@ const fakeDb = { collection: (name: string) => ({
     const cursor = { limit: (count: number) => { limit = count; return cursor; }, toArray: async () => (data[name] ??= []).filter((item) => matches(item, filter)).slice(0, limit).map((row) => project(row, options.projection)) };
     return cursor;
   },
-  listIndexes: () => ({ toArray: async () => { if (indexes === "missing") throw new MongoServerError({ message: "ns not found", code: 26 }); return indexes; } }),
+  listIndexes: () => ({ toArray: async () => { if (indexError) throw indexError; if (indexes === "missing") throw new MongoServerError({ message: "ns not found", code: 26 }); return indexes; } }),
   insertOne: async (doc: Row, options: { session: FakeSession }) => {
     if (failInsert === name) throw new Error("synthetic secret storage failure");
     if (name === "parkingTransactions" && doc.status === "completed" && (data.parkingTransactions ??= []).some((row) => row.status === "completed" && equal(row.tenantId, doc.tenantId) && equal(row.parkingSessionId, doc.parkingSessionId))) {
@@ -54,15 +61,17 @@ const fakeDb = { collection: (name: string) => ({
 function newSession(): FakeSession {
   const session: FakeSession = {
     writes: [],
-    withTransaction: async (work) => {
-      try { await work(); } catch (error) {
+    withTransaction: async (work, options) => {
+      transactionOptions.push(options);
+      const rollback = () => {
         for (const write of session.writes.reverse()) {
           if (write.kind === "insert") data[write.name] = data[write.name].filter((row) => row !== write.doc);
           else { for (const key of Object.keys(write.row)) delete write.row[key]; Object.assign(write.row, write.before); }
         }
         session.writes = [];
-        throw error;
-      }
+      };
+      try { await work(); } catch (error) { rollback(); throw error; }
+      if (commitError) { rollback(); throw commitError; }
       if (loseCommitReply) throw new MongoServerError({ message: "connection lost after commit", errorLabels: ["UnknownTransactionCommitResult"] });
     },
     endSession: async () => {},
@@ -86,6 +95,7 @@ const writesUntouched = () => { expect(data.parkingTransactions ?? []).toHaveLen
 beforeEach(() => {
   vi.resetAllMocks(); resetCheckoutIndexCacheForTests();
   barrier = undefined; failInsert = undefined; loseCommitReply = false; beforeUpdate = undefined;
+  indexError = undefined; failReadsOutsideTransaction = false; commitError = undefined; transactionOptions = [];
   vi.useFakeTimers({ now: serverNow, toFake: ["Date"] });
   mocks.guard.mockResolvedValue(ownerContext());
   mocks.db.mockResolvedValue(fakeDb);
@@ -251,6 +261,97 @@ describe("duplicates, retries and idempotency", () => {
     loseCommitReply = false;
     expect(await confirm()).toMatchObject({ ok: true, replayed: true });
     expect(data.parkingTransactions).toHaveLength(1);
+  });
+});
+
+describe("connection failures (P4.7)", () => {
+  // Safe operational log (P4.7 C): exactly one line per outage, no secrets.
+  const logLines = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>);
+  it("logs once per outage: Conflict + failed lookup logs the lookup; a resolved lost reply logs 'resolved'", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    beforeUpdate = () => { s1Row().status = "canceled"; failReadsOutsideTransaction = true; };
+    await confirm().catch(() => undefined);
+    failReadsOutsideTransaction = false; s1Row().status = "active";
+    loseCommitReply = true;
+    await confirm();
+    expect(logLines(spy)).toEqual([
+      expect.objectContaining({ operation: "parking.checkout", outcome: "unknown", phase: "lookup", errorClass: "MongoNetworkError" }),
+      expect.objectContaining({ operation: "parking.checkout", outcome: "resolved", phase: "transaction", labels: ["UnknownTransactionCommitResult"] }),
+    ]);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/synthetic|B 1234|B1234XYZ|10000|10\.000/);
+    spy.mockRestore();
+  });
+  it("the checkout view logs a storage failure once (checkout.read); a failed index check only as index.verify", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    failReadsOutsideTransaction = true;
+    await expect(getParkingCheckout(selection, s1.toHexString())).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    failReadsOutsideTransaction = false; indexError = new MongoNetworkError("synthetic secret host");
+    await expect(getParkingCheckout(selection, s1.toHexString())).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(logLines(spy).map((line) => line.operation)).toEqual(["checkout.read", "index.verify"]);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/synthetic|B 1234|B1234XYZ/);
+    spy.mockRestore();
+  });
+  it("lost races and business outcomes are not logged", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    beforeUpdate = () => { s1Row().status = "canceled"; };
+    await confirm();
+    s1Row().status = "active";
+    await confirm({ expectedTotal: 1 });
+    await confirm(); await confirm({ idempotencyKey: key2 });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+  const timeout = () => { const error = new MongoOperationTimeoutError("synthetic secret Timed out during withTransaction"); error.addErrorLabel("TransientTransactionError"); return error; };
+  it("bounds the whole transaction with the driver deadline (20 s), keeping snapshot/majority/primary", async () => {
+    await confirm();
+    expect(transactionOptions).toEqual([{ readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary", timeoutMS: 20_000 }]);
+  });
+  it("a failed index check (network) is unavailable, not not_ready, for the view and the payment; not cached", async () => {
+    indexError = new MongoNetworkError("synthetic secret host");
+    await expect(confirm()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    await expect(getParkingCheckout(selection, s1.toHexString())).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    writesUntouched();
+    indexError = undefined;
+    expect(await confirm()).toMatchObject({ ok: true, replayed: false });
+  });
+  it("a transaction timeout (not committed) is unknown, never success; the same key later pays exactly once", async () => {
+    commitError = timeout();
+    const error = await confirm().then(() => undefined, (caught: AppError) => caught);
+    expect(error).toMatchObject({ code: "SERVICE_UNAVAILABLE" }); expect(error?.message).not.toContain("synthetic");
+    writesUntouched();
+    commitError = undefined;
+    expect(await confirm()).toMatchObject({ ok: true, replayed: false, receipt: { totalAmount: 10_000 } });
+    expect(await confirm()).toMatchObject({ ok: true, replayed: true });
+    expect(data.parkingTransactions).toHaveLength(1);
+  });
+  it("an ambiguous commit whose lookup also fails stays unknown (no false success, no false failure)", async () => {
+    loseCommitReply = true; failReadsOutsideTransaction = true;
+    await expect(confirm()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(data.parkingTransactions).toHaveLength(1); // it did commit
+    loseCommitReply = false; failReadsOutsideTransaction = false;
+    expect(await confirm()).toMatchObject({ ok: true, replayed: true }); // checking again finds it; no second payment
+    expect(data.parkingTransactions).toHaveLength(1);
+  });
+  it("Conflict + failed lookup is unknown, not already_completed (the session may have been canceled)", async () => {
+    beforeUpdate = () => { s1Row().status = "canceled"; failReadsOutsideTransaction = true; };
+    await expect(confirm()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    expect(data.parkingTransactions).toHaveLength(0); expect(data.auditLogs).toHaveLength(0);
+  });
+  it("Conflict + readable lookup still reports what is committed (another payment: already_completed)", async () => {
+    const other = { _id: new ObjectId(), tenantId: t1, locationId: l1, parkingSessionId: s1, status: "completed", idempotencyKey: key2, processedBy: otherUser, amountPaid: 5_000, paymentAt: serverNow, tariffSnapshot: { tariffType: "regular", amountPerUnit: 5_000, totalAmount: 5_000 } };
+    beforeUpdate = () => { s1Row().status = "completed"; s1Row().exitAt = serverNow; data.parkingTransactions.push(other); };
+    expect(await confirm()).toEqual({ ok: false, reason: "already_completed" });
+    expect(data.parkingTransactions).toEqual([other]);
+  });
+  it("a duplicate key on the completed-payment index proves another payment even if the lookup fails", async () => {
+    data.parkingTransactions.push({ _id: new ObjectId(), tenantId: t1, locationId: l1, parkingSessionId: s1, status: "completed", idempotencyKey: key2, processedBy: otherUser });
+    failReadsOutsideTransaction = true;
+    expect(await confirm()).toEqual({ ok: false, reason: "already_completed" });
+    expect(data.parkingTransactions).toHaveLength(1); expect(s1Row().status).toBe("active");
+  });
+  it("business rules are unchanged by the timeouts: the server total and the expectedTotal check still apply", async () => {
+    expect(await confirm({ expectedTotal: 9_999 })).toEqual({ ok: false, reason: "price_changed", totalAmount: 10_000 });
+    expect(await confirm({ tariffType: "regular", nightCount: undefined, expectedTotal: 5_000 })).toMatchObject({ ok: true, receipt: { tariffType: "regular", totalAmount: 5_000 } });
   });
 });
 

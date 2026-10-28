@@ -147,3 +147,21 @@ it("rejects corrupt assignment arrays and unknown requested permission", async (
   await expect(requireLocationContext()).rejects.toMatchObject({ code: "FORBIDDEN" });
   await expect(requirePermission("superuser" as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
 });
+
+// P4.7 D: read-path logging at the guard, once, without secrets.
+it("logs a storage failure in the guard once (auth.guard) and never an authorization outcome or an already-handled AppError", async () => {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.members.mockRejectedValueOnce(new Error("sensitive database detail synthetic-secret"));
+  await expect(requireLocationContext()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(spy.mock.calls[0][0]))).toMatchObject({ operation: "auth.guard", outcome: "unavailable", phase: "read", errorClass: "Error" });
+  expect(JSON.stringify(spy.mock.calls)).not.toMatch(new RegExp(["sensitive", "synthetic", uid.toHexString(), tid.toHexString()].join("|")));
+  spy.mockClear();
+  member.status = "inactive"; await expect(requireLocationContext()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  mocks.session.mockRejectedValueOnce(new AppError("SERVICE_UNAVAILABLE")); // logged by auth-session itself
+  await expect(requireLocationContext()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  mocks.session.mockRejectedValueOnce(new AppError("UNAUTHENTICATED"));
+  await expect(requireLocationContext()).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  expect(spy).not.toHaveBeenCalled();
+  spy.mockRestore();
+});

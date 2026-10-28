@@ -9,6 +9,7 @@ import type { CheckoutQuote, CheckoutReceipt } from "../../lib/dal/parking-check
 import { confirmCheckoutAction } from "../../lib/parking-actions";
 import { calculateCharge, formatRupiah, maxNightCount } from "../../lib/parking-tariff";
 import { vehicleTypeLabels } from "../../lib/plates";
+import { SlowPendingNotice } from "../slow-pending-notice";
 import { formatDuration, formatLocalDateTime } from "../../lib/time";
 import { VEHICLE_EXIT_PATH } from "../../lib/owner-navigation";
 import { CheckoutReceiptDetails, tariffBreakdown } from "./checkout-receipt";
@@ -142,6 +143,7 @@ export function CheckoutForm({ quote, backHref }: { quote: CheckoutQuote; backHr
             </AlertDialogHeader>
             {error && open && <p role="alert" className="text-sm text-destructive">{error.message}</p>}
             <p role="status" className="sr-only">{pending ? "Menyimpan pembayaran..." : ""}</p>
+            <SlowPendingNotice pending={pending} />
             <AlertDialogFooter>
               <AlertDialogCancel className="h-11" disabled={pending}>Batal</AlertDialogCancel>
               {/* A plain button (not AlertDialogAction) keeps the dialog open while the server works. */}

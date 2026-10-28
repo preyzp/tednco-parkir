@@ -82,3 +82,16 @@ test("auth/DB failures use sanitized unavailable errors without implying success
   mocks.findOne.mockRejectedValueOnce(new Error("synthetic database secret"));
   await expect(getCurrentSession(incoming)).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
 });
+
+test("P4.7 D: a session lookup outage is logged once (auth.session) without cookies, tokens or messages; 401 is not logged", async () => {
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  mocks.getSession.mockRejectedValueOnce(new APIError("UNAUTHORIZED", { message: "synthetic error" }));
+  expect(await getCurrentSession(incoming)).toBeNull();
+  expect(spy).not.toHaveBeenCalled();
+  mocks.findOne.mockRejectedValueOnce(new Error("synthetic database secret mongodb+srv://u:p@cluster0"));
+  await expect(getCurrentSession(incoming)).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(spy.mock.calls[0][0]))).toMatchObject({ operation: "auth.session", outcome: "unavailable", phase: "read" });
+  expect(JSON.stringify(spy.mock.calls)).not.toMatch(/synthetic|cookie|cluster0|untrusted|example\.test/);
+  spy.mockRestore();
+});

@@ -48,6 +48,15 @@ const authEnvSchema = z.object({
   }).transform((value) => new URL(value).origin),
 });
 
+// Optional token for the database mode of GET /api/health. Missing, blank or
+// shorter than 32 characters means the database check is disabled (never an
+// error, never a weak token). The value is never logged or returned.
+export const HEALTHCHECK_TOKEN_MIN_LENGTH = 32;
+export function getHealthcheckToken(): string | undefined {
+  const value = process.env.HEALTHCHECK_TOKEN;
+  return typeof value === "string" && value.trim() === value && value.length >= HEALTHCHECK_TOKEN_MIN_LENGTH ? value : undefined;
+}
+
 // Auth validation is separate: DB maintenance never needs an auth secret.
 export function getAuthEnv(): z.infer<typeof authEnvSchema> {
   const result = authEnvSchema.safeParse({

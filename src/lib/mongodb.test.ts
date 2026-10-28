@@ -72,8 +72,10 @@ test("concurrent calls share a pending connection and later reuse the client", a
   expect(db).toEqual({ databaseName: "tednco_test" });
   expect(mocks.db).toHaveBeenCalledWith("tednco_test");
   expect(mocks.construct).toHaveBeenCalledWith(
-    "mongodb://synthetic:password@localhost:27017", { serverSelectionTimeoutMS: 10_000 },
+    "mongodb://synthetic:password@localhost:27017", { serverSelectionTimeoutMS: 5_000, connectTimeoutMS: 10_000 },
   );
+  // No client-wide timeoutMS: it would also bound Better Auth and every read.
+  expect(Object.keys(mocks.construct.mock.calls[0][1] as object)).not.toContain("timeoutMS");
   expect(mocks.connect).toHaveBeenCalledTimes(1);
   expect(mocks.close).not.toHaveBeenCalled();
 });

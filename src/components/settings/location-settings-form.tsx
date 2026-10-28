@@ -12,6 +12,7 @@ import {
   AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "../ui/alert-dialog";
+import { SlowPendingNotice } from "../slow-pending-notice";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -169,6 +170,7 @@ export function LocationSettingsForm({ settings: initial }: { settings: Location
         </Alert>
       )}
       <p role="status" className="sr-only">{pending ? "Menyimpan pengaturan..." : ""}</p>
+      <SlowPendingNotice pending={pending && !confirmOpen} />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Button type="submit" className="h-12 w-full sm:w-auto" disabled={!canSave}>{pending ? <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Save aria-hidden="true" />}{pending ? "Menyimpan..." : "Simpan Pengaturan"}</Button>
         {!changed && !unconfigured && <p className="text-sm text-muted-foreground">Tidak ada perubahan.</p>}
@@ -180,6 +182,7 @@ export function LocationSettingsForm({ settings: initial }: { settings: Location
             <AlertDialogDescription>Ada {settings.activeVehicleCount} kendaraan sedang parkir di {settings.locationName}. Tarif dan jam baru akan berlaku saat kendaraan tersebut checkout, termasuk rekomendasi jumlah malam dan biayanya.</AlertDialogDescription>
           </AlertDialogHeader>
           <p role="status" className="sr-only">{pending ? "Menyimpan pengaturan..." : ""}</p>
+          <SlowPendingNotice pending={pending} />
           <AlertDialogFooter>
             <AlertDialogCancel className="h-11" disabled={pending}>Batal</AlertDialogCancel>
             {/* A plain button (not AlertDialogAction) keeps the dialog open while the server works. */}

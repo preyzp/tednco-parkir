@@ -2,10 +2,13 @@ import "server-only";
 import { MongoServerError, ObjectId, type ClientSession, type Db } from "mongodb";
 import { getDb, getMongoClient } from "../mongodb";
 import { AppError } from "../errors";
+import { logOperationalError } from "../log";
 import { safeTimeZone } from "../time";
 import { calculateCharge, countNights, defaultParkingPolicy, isTariffAmount, resolveOperatingPolicy, suggestTariff, type OperatingPolicy, type ParkingRates } from "../parking-tariff";
 import { checkoutConfirmSchema, type CheckoutConfirmInput } from "../validations/parking-checkout";
 import { requirePermission, type AuthorizationSelection, type LocationContext } from "./authorization";
+import { hasUniquePartialIndex } from "./index-verification";
+import { transactionOptions } from "./transaction-options";
 import type { TariffType, VehicleType } from "../../types";
 
 // Vehicle checkout (P4.5): Owner-only, cash-only. The total is always computed
@@ -56,23 +59,15 @@ export type CheckoutResult =
 // (DATABASE_SCHEMA 11). Fail closed until it exists, like the P4.3 entry index.
 export const completedTransactionIndex = { name: "parking_transactions_completed_session_unique", key: { tenantId: 1, parkingSessionId: 1 }, partialFilterExpression: { status: "completed" } } as const;
 let completedTransactionIndexVerified = false;
+// Throws AppError SERVICE_UNAVAILABLE when the check itself fails (not cached).
 async function hasCompletedTransactionIndex(db: Db): Promise<boolean> {
-  if (completedTransactionIndexVerified) return true;
-  try {
-    const indexes = await db.collection("parkingTransactions").listIndexes().toArray();
-    completedTransactionIndexVerified = indexes.some((index) => index.unique === true && !index.sparse && !index.collation
-      && JSON.stringify(index.key) === JSON.stringify(completedTransactionIndex.key)
-      && JSON.stringify(index.partialFilterExpression) === JSON.stringify(completedTransactionIndex.partialFilterExpression));
-  } catch {
-    completedTransactionIndexVerified = false; // e.g. NamespaceNotFound before the migration
-  }
+  if (!completedTransactionIndexVerified) completedTransactionIndexVerified = await hasUniquePartialIndex(db, "parkingTransactions", completedTransactionIndex);
   return completedTransactionIndexVerified;
 }
 /** Test hook: forget the cached index verification. */
 export function resetCheckoutIndexCacheForTests(): void { completedTransactionIndexVerified = false; }
 
 type Options = { session?: ClientSession };
-const transactionOptions = { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary" } as const;
 const isVehicleType = (value: unknown): value is VehicleType => value === "motor" || value === "mobil";
 const isTariffType = (value: unknown): value is TariffType => value === "regular" || value === "overnight";
 class Conflict extends Error {}
@@ -155,6 +150,7 @@ export async function getParkingCheckout(selection: AuthorizationSelection, rawS
     }) };
   } catch (error) {
     if (error instanceof AppError) throw error;
+    logOperationalError("checkout.read", error, { outcome: "unavailable", phase: "read" });
     throw new AppError("SERVICE_UNAVAILABLE");
   }
 }
@@ -251,13 +247,19 @@ export async function completeParkingCheckout(selection: AuthorizationSelection,
     return outcome;
   } catch (error) {
     if (error instanceof AppError && error.code !== "SERVICE_UNAVAILABLE") throw error;
-    // Lost race (conditional update/unique index) or ambiguous failure: report
-    // only what is actually committed; otherwise the outcome stays unknown.
-    if (error instanceof Conflict || (error instanceof MongoServerError && error.code === 11000)) {
-      const committed = await lookup().catch(() => null);
-      return committed ?? { ok: false, reason: "already_completed" };
-    }
-    const committed = await lookup().catch(() => null);
+    // Lost race (conditional update/unique index), timeout or ambiguous commit:
+    // report only what is actually committed; otherwise the outcome stays
+    // unknown. Only a duplicate key on the completed-payment index proves that
+    // another payment exists; a failed conditional update (Conflict) does not
+    // say whether the session was completed or canceled.
+    let lookupError: unknown;
+    const committed = await lookup().catch((failure: unknown) => { lookupError = failure; return null; });
+    if (error instanceof MongoServerError && error.code === 11000) return committed ?? { ok: false, reason: "already_completed" };
+    // One log line per request: the raw outage error; after our own Conflict,
+    // the failed lookup that left the outcome unknown. AppErrors were raised
+    // (and, for the index check, already logged) by our own code.
+    const raw = error instanceof Conflict ? lookupError : error instanceof AppError ? undefined : error;
+    if (raw !== undefined) logOperationalError("parking.checkout", raw, { outcome: committed ? "resolved" : "unknown", phase: raw === lookupError ? "lookup" : "transaction" });
     if (committed) return committed;
     throw new AppError("SERVICE_UNAVAILABLE");
   } finally {

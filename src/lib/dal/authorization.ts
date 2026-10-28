@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireAuthenticatedSession } from "../auth-session";
 import { getDb } from "../mongodb";
 import { AppError } from "../errors";
+import { logOperationalError } from "../log";
 import { effectivePermissions, permissions } from "./permissions";
 import type { User, Membership, Tenant, Location, Permission, TenantRole } from "../../types";
 
@@ -24,7 +25,11 @@ function same(a: ObjectId, b: ObjectId) { return a.equals(b); }
 
 async function boundary<T>(work: () => Promise<T>): Promise<T> {
   try { return await work(); }
-  catch (error) { if (error instanceof AppError) throw error; throw new AppError("SERVICE_UNAVAILABLE"); }
+  catch (error) {
+    if (error instanceof AppError) throw error; // incl. a session failure already logged by auth-session
+    logOperationalError("auth.guard", error, { outcome: "unavailable", phase: "read" });
+    throw new AppError("SERVICE_UNAVAILABLE");
+  }
 }
 async function identity() {
   const session = await requireAuthenticatedSession();

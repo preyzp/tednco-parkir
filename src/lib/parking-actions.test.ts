@@ -39,14 +39,34 @@ it("reports an unready server (missing index) without claiming success", async (
   mocks.record.mockResolvedValue({ ok: false, reason: "not_ready" });
   expect((await submit()).message).toContain("belum siap");
 });
-it("maps forbidden, unavailable and unauthenticated outcomes safely", async () => {
+it("maps forbidden and unauthenticated outcomes safely", async () => {
   mocks.record.mockRejectedValueOnce(new AppError("FORBIDDEN"));
   expect((await submit()).message).toContain("tidak memiliki akses");
-  mocks.record.mockRejectedValueOnce(new Error("synthetic secret"));
-  const state = await submit();
-  expect(state.message).toContain("Periksa dashboard"); expect(JSON.stringify(state)).not.toContain("synthetic");
   mocks.resolve.mockRejectedValueOnce(new AppError("UNAUTHENTICATED"));
   await expect(submit()).rejects.toThrow("redirect:/login");
+});
+
+describe("vehicle entry when the database fails (P4.7)", () => {
+  it("a definite failure before any commit says 'not recorded' and is a plain error", async () => {
+    mocks.record.mockResolvedValue({ ok: false, reason: "unavailable" });
+    const state = await submit();
+    expect(state).toEqual({ status: "error", message: expect.stringContaining("belum dicatat") });
+  });
+  it("an unreachable workspace guard (before the entry is attempted) is also a definite failure", async () => {
+    mocks.resolve.mockRejectedValue(new AppError("SERVICE_UNAVAILABLE"));
+    const state = await submit();
+    expect(state.status).toBe("error"); expect(state.message).toContain("belum dicatat");
+    expect(mocks.record).not.toHaveBeenCalled();
+  });
+  it.each([["SERVICE_UNAVAILABLE (ambiguous commit)", new AppError("SERVICE_UNAVAILABLE")], ["an unexpected error", new Error("synthetic secret")]])(
+    "%s is unknown: never success and never 'not recorded'; asks to check the vehicle list", async (_label, error) => {
+      mocks.record.mockRejectedValue(error);
+      const state = await submit();
+      expect(state.status).toBe("unknown");
+      expect(state.message).toContain("Periksa daftar kendaraan");
+      expect(state.message).not.toContain("belum dicatat"); expect(state.entry).toBeUndefined();
+      expect(JSON.stringify(state)).not.toContain("synthetic");
+    });
 });
 
 describe("confirmCheckoutAction", () => {

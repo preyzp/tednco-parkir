@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Dialog-heavy jsdom form: generous limits for loaded parallel runs (logic unchanged).
 vi.setConfig({ testTimeout: 20_000 });
@@ -115,5 +115,33 @@ describe("confirmation", () => {
     expect(await screen.findByText(/berubah menjadi Rp20.000/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("slow server (P4.7)", () => {
+  afterEach(() => vi.useRealTimers());
+  it("after 10 s the dialog says the server is still processing; one request, same key; gone after the reply", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const first = deferred<{ status: "unknown"; message: string }>();
+    mocks.action.mockReturnValueOnce(first.promise);
+    render(<CheckoutForm quote={quote} backHref="/app/kendaraan" />);
+    openDialog(); fireEvent.click(confirmButton());
+    await act(async () => {});
+    act(() => { vi.advanceTimersByTime(9_999); });
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
+    act(() => { vi.advanceTimersByTime(1); });
+    const notice = within(screen.getByRole("alertdialog")).getByText(/Server masih memproses/);
+    expect(notice.textContent).not.toMatch(/coba lagi|ulangi/i);
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    await act(async () => { first.resolve({ status: "unknown", message: "Status pembayaran belum dapat dipastikan." }); });
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
+    expect(screen.queryByText("Pembayaran tercatat")).toBeNull(); expect(mocks.success).not.toHaveBeenCalled();
+    // Checking again reuses the same idempotency key (the hint never creates a new request).
+    mocks.action.mockResolvedValueOnce({ status: "success", receipt });
+    fireEvent.click(confirmButton());
+    await act(async () => {});
+    expect(mocks.action).toHaveBeenCalledTimes(2);
+    expect(mocks.action.mock.calls[1][0].idempotencyKey).toBe(mocks.action.mock.calls[0][0].idempotencyKey);
+    expect(mocks.action.mock.calls[1][0]).toEqual(mocks.action.mock.calls[0][0]);
   });
 });

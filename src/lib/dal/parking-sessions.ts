@@ -2,9 +2,12 @@ import "server-only";
 import { MongoServerError, ObjectId, type ClientSession, type Db } from "mongodb";
 import { getDb, getMongoClient } from "../mongodb";
 import { AppError } from "../errors";
+import { logOperationalError } from "../log";
 import { safeTimeZone, startOfLocalDay } from "../time";
 import { vehicleEntryFieldErrors, vehicleEntryFormSchema } from "../validations/parking-entry";
-import { requirePermission, type AuthorizationSelection } from "./authorization";
+import { requirePermission, type AuthorizationSelection, type LocationContext } from "./authorization";
+import { hasUniquePartialIndex } from "./index-verification";
+import { transactionOptions } from "./transaction-options";
 import { sumCompletedPayments } from "./parking-checkout";
 import type { VehicleType } from "../../types";
 
@@ -16,40 +19,45 @@ export type VehicleEntryResult =
   | { readonly ok: true; readonly entry: { readonly plateNumber: string; readonly vehicleType: VehicleType; readonly entryAt: string; readonly timeZone: string; readonly locationName: string } }
   | { readonly ok: false; readonly reason: "validation"; readonly fieldErrors: Partial<Record<"plateNumber" | "vehicleType" | "notes", string>> }
   | { readonly ok: false; readonly reason: "duplicate_active" }
-  | { readonly ok: false; readonly reason: "not_ready" };
+  | { readonly ok: false; readonly reason: "not_ready" }
+  // Definitely not recorded: the database failed before any commit was attempted.
+  | { readonly ok: false; readonly reason: "unavailable" };
 
 // The documented guard against two active sessions (DATABASE_SCHEMA 9) is this
 // unique partial index; a pre-insert findOne alone is not concurrency-safe.
 export const activePlateIndex = { name: "parking_sessions_active_plate_unique", key: { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1 }, partialFilterExpression: { status: "active" } } as const;
 let activePlateIndexVerified = false;
 // Fail closed: without the unique index, entries are refused rather than risk duplicates.
+// Throws AppError SERVICE_UNAVAILABLE when the check itself fails (not cached).
 async function hasActivePlateIndex(db: Db): Promise<boolean> {
-  if (activePlateIndexVerified) return true;
-  try {
-    const indexes = await db.collection("parkingSessions").listIndexes().toArray();
-    activePlateIndexVerified = indexes.some((index) => index.unique === true && !index.sparse && !index.collation
-      && JSON.stringify(index.key) === JSON.stringify(activePlateIndex.key)
-      && JSON.stringify(index.partialFilterExpression) === JSON.stringify(activePlateIndex.partialFilterExpression));
-  } catch {
-    activePlateIndexVerified = false; // e.g. NamespaceNotFound before the migration
-  }
+  if (!activePlateIndexVerified) activePlateIndexVerified = await hasUniquePartialIndex(db, "parkingSessions", activePlateIndex);
   return activePlateIndexVerified;
 }
 /** Test hook: forget the cached index verification. */
 export function resetParkingIndexCacheForTests(): void { activePlateIndexVerified = false; }
 
 class Duplicate extends Error {}
-const transactionOptions = { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" }, readPreference: "primary" } as const;
 
 // Owner-only for this phase (Admin/Staff entry is out of scope).
-// Throws AppError UNAUTHENTICATED / FORBIDDEN / SERVICE_UNAVAILABLE.
+// Throws AppError UNAUTHENTICATED / FORBIDDEN, or SERVICE_UNAVAILABLE only when
+// the outcome is unknown (the commit may have succeeded): callers must not claim
+// the vehicle was not recorded. A failure before any commit is "unavailable".
 export async function recordVehicleEntry(selection: AuthorizationSelection, raw: unknown): Promise<VehicleEntryResult> {
-  const context = await requirePermission("vehicle.create", selection);
+  let context: LocationContext;
+  try {
+    context = await requirePermission("vehicle.create", selection);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "SERVICE_UNAVAILABLE") return { ok: false, reason: "unavailable" };
+    throw error;
+  }
   if (context.role !== "owner") throw new AppError("FORBIDDEN");
   const parsed = vehicleEntryFormSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, reason: "validation", fieldErrors: vehicleEntryFieldErrors(parsed.error) };
   const input = parsed.data;
   let session: ClientSession | undefined;
+  // The driver commits only after the callback finishes, so until it has
+  // finished once nothing can have been committed. Never reset on a retry.
+  let commitAttempted = false;
   try {
     const db = await getDb();
     if (!await hasActivePlateIndex(db)) return { ok: false, reason: "not_ready" };
@@ -80,6 +88,7 @@ export async function recordVehicleEntry(selection: AuthorizationSelection, raw:
         entryAt: now, status: "active", enteredBy: context.userId, createdAt: now, updatedAt: now,
       }, options);
       result = { plateNumber: input.plateNumber, vehicleType: input.vehicleType, entryAt: now.toISOString(), timeZone: safeTimeZone(tenant.timezone), locationName: typeof location.name === "string" ? location.name : "" };
+      commitAttempted = true;
     }, transactionOptions);
     if (!result) throw new AppError("SERVICE_UNAVAILABLE");
     return { ok: true, entry: result };
@@ -87,8 +96,13 @@ export async function recordVehicleEntry(selection: AuthorizationSelection, raw:
     if (error instanceof Duplicate) return { ok: false, reason: "duplicate_active" };
     // A concurrent entry that won the unique partial index.
     if (error instanceof MongoServerError && error.code === 11000) return { ok: false, reason: "duplicate_active" };
-    if (error instanceof AppError) throw error;
-    // Includes ambiguous commits: callers must not claim success.
+    if (error instanceof AppError && error.code !== "SERVICE_UNAVAILABLE") throw error;
+    // AppErrors were raised (and, for the index check, logged) by our own code.
+    if (!(error instanceof AppError)) logOperationalError("vehicle.entry", error, { outcome: commitAttempted ? "unknown" : "unavailable", phase: "transaction" });
+    if (!commitAttempted) return { ok: false, reason: "unavailable" };
+    // Ambiguous commit (incl. a transaction timeout during commit): unknown,
+    // neither success nor "not recorded". A retry is safe: the unique index
+    // turns a committed entry into duplicate_active.
     throw new AppError("SERVICE_UNAVAILABLE");
   } finally {
     await session?.endSession().catch(() => {});
@@ -126,7 +140,8 @@ export async function getLocationParkingOverview(selection: AuthorizationSelecti
     const recent = rows.flatMap((row) => (row.entryAt instanceof Date && typeof row.plateNumberSnapshot === "string" && (row.vehicleTypeSnapshot === "motor" || row.vehicleTypeSnapshot === "mobil") && ["active", "completed", "canceled"].includes(row.status)
       ? [Object.freeze({ plateNumber: row.plateNumberSnapshot, vehicleType: row.vehicleTypeSnapshot as VehicleType, entryAt: row.entryAt.toISOString(), status: row.status as "active" | "completed" | "canceled" })] : []));
     return Object.freeze({ activeCount, entriesToday, exitsToday, revenueToday, timeZone, recent: Object.freeze(recent) });
-  } catch {
+  } catch (error) {
+    logOperationalError("dashboard.read", error, { outcome: "unavailable", phase: "read" });
     throw new AppError("SERVICE_UNAVAILABLE");
   }
 }
@@ -206,7 +221,9 @@ export async function listLocationVehicles(selection: AuthorizationSelection, qu
         status: row.status as VehicleListRow["status"], ...(typeof row.notes === "string" && row.notes ? { notes: row.notes } : {}),
       })] : []));
     return Object.freeze({ rows: Object.freeze(rows), total, page, pageSize: vehicleListPageSize, pageCount, timeZone, ready });
-  } catch {
+  } catch (error) {
+    // A failed index check was already logged by index-verification.
+    if (!(error instanceof AppError)) logOperationalError("vehicles.read", error, { outcome: "unavailable", phase: "read" });
     throw new AppError("SERVICE_UNAVAILABLE");
   }
 }

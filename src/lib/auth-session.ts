@@ -8,6 +8,7 @@ import { getAuth } from "./auth";
 import { getDb } from "./mongodb";
 import { authCollectionNames } from "./auth-schema";
 import { AppError } from "./errors";
+import { logOperationalError } from "./log";
 import type { User } from "../types";
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i);
@@ -62,6 +63,7 @@ export async function getCurrentSession(requestHeaders?: Headers): Promise<Authe
     return await resolveAuthenticatedSession(verified);
   } catch (error) {
     if (error instanceof APIError && error.statusCode === 401) return null;
+    logOperationalError("auth.session", error, { outcome: "unavailable", phase: "read" });
     throw new AppError("SERVICE_UNAVAILABLE");
   }
 }

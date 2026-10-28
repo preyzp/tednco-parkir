@@ -4,6 +4,12 @@ import { MongoClient, type Db } from "mongodb";
 
 import { getServerEnv } from "./env";
 
+// Fail fast when Atlas is unreachable instead of holding requests open:
+// server selection (incl. the initial connect) and each new socket/TLS
+// handshake. No client-wide timeoutMS: Better Auth and reads keep driver defaults.
+export const mongoClientOptions = { serverSelectionTimeoutMS: 5_000, connectTimeoutMS: 10_000 } as const;
+// Transaction deadlines live in dal/transaction-options.ts.
+
 type Connection = { client: MongoClient; dbName: string };
 type ConnectionCache = { promise?: Promise<Connection> };
 
@@ -24,9 +30,7 @@ function getConnection(): Promise<Connection> {
         const { MONGODB_URI, MONGODB_DB_NAME } = getServerEnv();
         let client: MongoClient | undefined;
         try {
-          client = new MongoClient(MONGODB_URI, {
-            serverSelectionTimeoutMS: 10_000,
-          });
+          client = new MongoClient(MONGODB_URI, mongoClientOptions);
           await client.connect();
           return { client, dbName: MONGODB_DB_NAME };
         } catch {

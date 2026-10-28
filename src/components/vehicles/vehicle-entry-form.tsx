@@ -1,12 +1,15 @@
 "use client";
 import { useActionState, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { AlertCircle, Bike, Car, CircleCheck, LoaderCircle, LogIn, Plus } from "lucide-react";
+import { AlertCircle, AlertTriangle, Bike, Car, CircleCheck, List, LoaderCircle, LogIn, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { recordVehicleEntryAction, type VehicleEntryFormState } from "../../lib/parking-actions";
 import { AUTHENTICATED_PATH } from "../../lib/login";
 import { displayPlate, vehicleTypeLabels } from "../../lib/plates";
 import { formatLocalDateTime } from "../../lib/time";
+import { vehicleListHref, vehicleSearchValue } from "../../lib/vehicle-list";
+import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { SlowPendingNotice } from "../slow-pending-notice";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
@@ -58,11 +61,14 @@ function EntryForm({ onRecorded }: { onRecorded: (entry: NonNullable<VehicleEntr
         onRecorded(next.entry);
       } else if (next.status === "error" && next.message) {
         toast.error("Kendaraan belum dicatat.", { id: "vehicle-entry", description: next.message });
+      } else if (next.status === "unknown") {
+        toast.warning("Status pencatatan belum pasti.", { id: "vehicle-entry", description: "Periksa daftar kendaraan sebelum mencoba lagi." });
       }
       return next;
     } catch {
-      toast.error("Kendaraan belum dicatat.", { id: "vehicle-entry", description: "Tidak dapat terhubung. Periksa koneksi, lalu cek dashboard sebelum mencoba lagi." });
-      return { status: "error" as const };
+      // The request may have reached the server and committed: never "not recorded".
+      toast.warning("Status pencatatan belum pasti.", { id: "vehicle-entry", description: "Periksa daftar kendaraan sebelum mencoba lagi." });
+      return { status: "unknown" as const, message: "Koneksi terputus sebelum server menjawab. Periksa daftar kendaraan sebelum mencoba lagi agar tidak tercatat ganda." };
     } finally { submitting.current = false; }
   }, idle);
   const errors = { ...state.fieldErrors, ...clientErrors };
@@ -107,7 +113,18 @@ function EntryForm({ onRecorded }: { onRecorded: (entry: NonNullable<VehicleEntr
         {!errors.notes && <p id="notes-count" className="text-right text-xs text-muted-foreground">{notes.length}/{NOTES_MAX}</p>}
         <FieldError id="notes-error" message={errors.notes} />
       </div>
+      {state.status === "unknown" && !pending && (
+        <Alert role="alert">
+          <AlertTriangle aria-hidden="true" />
+          <AlertTitle>Status pencatatan belum pasti</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{state.message}</p>
+            <Button asChild variant="outline" className="h-11"><Link href={vehicleListHref({ q: vehicleSearchValue(preview) })}><List aria-hidden="true" />Periksa daftar kendaraan</Link></Button>
+          </AlertDescription>
+        </Alert>
+      )}
       <p role="status" className="sr-only">{pending ? "Mencatat kendaraan masuk..." : ""}</p>
+      <SlowPendingNotice pending={pending} />
       <Button type="submit" className="h-12 w-full sm:w-auto" disabled={pending}>{pending ? <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <LogIn aria-hidden="true" />}{pending ? "Mencatat..." : "Catat Kendaraan Masuk"}</Button>
     </form>
   );

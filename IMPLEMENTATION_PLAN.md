@@ -464,7 +464,7 @@ Jangan mengaktifkan limit subscription sebelum ada kebijakan akses dan mekanisme
 - [ ] P8.10 — Jalankan accessibility checks.
 - [ ] P8.11 — Setup production environment.
 - [ ] P8.12 — Setup database indexes di production.
-- [ ] P8.13 — Setup monitoring dan error logging.
+- [ ] P8.13 — Setup monitoring dan error logging. (Sebagian, P4.7 label operator 2026-10-28: `GET /api/health` liveness + database health ber-token dengan cache 30 s, log operasional aman `src/lib/log.ts`, error boundary Owner App, batas waktu koneksi/transaksi, panduan `OPERATIONS.md`. **Belum:** monitoring eksternal/alert Atlas, tier/backup non-M0 untuk pilot.)
 - [ ] P8.14 — Verifikasi backup/recovery strategy.
 - [ ] P8.15 — Deploy staging.
 - [ ] P8.16 — Jalankan pilot acceptance testing.

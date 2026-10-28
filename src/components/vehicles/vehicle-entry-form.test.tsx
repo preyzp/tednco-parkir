@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, configure } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, configure } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Typing-heavy jsdom form: generous limits for loaded parallel runs (logic unchanged).
 vi.setConfig({ testTimeout: 20_000 });
 configure({ asyncUtilTimeout: 5_000 });
-const mocks = vi.hoisted(() => ({ action: vi.fn(), success: vi.fn(), error: vi.fn() }));
+const mocks = vi.hoisted(() => ({ action: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock("../../lib/parking-actions", () => ({ recordVehicleEntryAction: mocks.action }));
-vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error } }));
+vi.mock("sonner", () => ({ toast: { success: mocks.success, error: mocks.error, warning: mocks.warning } }));
 import { VehicleEntryForm } from "./vehicle-entry-form";
 
 beforeEach(() => { vi.resetAllMocks(); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
@@ -81,12 +81,58 @@ describe("server outcomes", () => {
     await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Kendaraan tercatat masuk")).toBeNull();
   });
-  it("network failure: error toast advising to check before retrying", async () => {
-    mocks.action.mockRejectedValue(new TypeError("Failed to fetch"));
+  it("a definite server failure (database unreachable before commit) is an error toast", async () => {
+    mocks.action.mockResolvedValue({ status: "error", message: "Kendaraan belum dicatat karena server data tidak dapat dihubungi. Periksa koneksi, lalu coba lagi." });
     render(<VehicleEntryForm />); const user = userEvent.setup();
     await fill(user); await user.click(screen.getByRole("button", { name: "Catat Kendaraan Masuk" }));
     await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1));
-    expect(mocks.error.mock.calls[0][1].description).toContain("Tidak dapat terhubung");
+    expect(screen.queryByText("Status pencatatan belum pasti")).toBeNull();
+  });
+});
+
+describe("unknown outcome (P4.7): never success, never 'not recorded'", () => {
+  const expectUnknown = async (message: RegExp) => {
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Status pencatatan belum pasti");
+    expect(alert.textContent).toMatch(message);
+    expect(screen.getByRole("link", { name: "Periksa daftar kendaraan" }).getAttribute("href")).toBe("/app/kendaraan?q=B+1234+XYZ");
+    expect(mocks.warning).toHaveBeenCalledWith("Status pencatatan belum pasti.", expect.objectContaining({ id: "vehicle-entry" }));
+    expect(mocks.success).not.toHaveBeenCalled(); expect(mocks.error).not.toHaveBeenCalled();
     expect(screen.queryByText("Kendaraan tercatat masuk")).toBeNull();
+    expect(plate().value).toBe(" b  1234  xyz"); // kept for a retry after checking
+  };
+  it("an unconfirmed commit from the server shows the check-the-list instruction", async () => {
+    mocks.action.mockResolvedValue({ status: "unknown", message: "Status pencatatan belum dapat dipastikan. Periksa daftar kendaraan sebelum mencoba lagi agar tidak tercatat ganda." });
+    render(<VehicleEntryForm />); const user = userEvent.setup();
+    await fill(user); await user.click(screen.getByRole("button", { name: "Catat Kendaraan Masuk" }));
+    await expectUnknown(/belum dapat dipastikan/);
+  });
+  it("a network failure (the request may have reached the server) is unknown too", async () => {
+    mocks.action.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<VehicleEntryForm />); const user = userEvent.setup();
+    await fill(user); await user.click(screen.getByRole("button", { name: "Catat Kendaraan Masuk" }));
+    await expectUnknown(/Koneksi terputus/);
+  });
+});
+
+describe("slow server (P4.7)", () => {
+  afterEach(() => vi.useRealTimers());
+  it("after 10 s shows a still-processing hint; one request; removed when the reply arrives", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = deferred<{ status: "success"; entry: typeof recorded }>();
+    mocks.action.mockReturnValue(pending.promise);
+    render(<VehicleEntryForm />);
+    fireEvent.change(plate(), { target: { value: "B 1234 XYZ" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Mobil" }));
+    fireEvent.click(screen.getByRole("button", { name: "Catat Kendaraan Masuk" }));
+    await act(async () => {});
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(screen.getByText(/Server masih memproses/).textContent).not.toMatch(/coba lagi|ulangi/i);
+    expect(mocks.action).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve({ status: "success", entry: recorded }); });
+    expect(screen.queryByText(/Server masih memproses/)).toBeNull();
+    expect(screen.getByText("Kendaraan tercatat masuk")).toBeTruthy();
   });
 });
