@@ -1,13 +1,14 @@
 // @ts-check
 import { developmentDatabase } from "./dev-provisioning-core.mjs";
 
-// Must equal the parkingSessions/vehicles/parkingTransactions entries of
+// Must equal the parkingSessions/vehicles/parkingTransactions/tariffs entries of
 // src/lib/database-indexes.ts (enforced by scripts/parking-indexes.test.ts).
 // The unique partial indexes are the documented guards against two active
-// sessions for one plate per location (P4.3) and two completed payments for one
-// session (P4.5 checkout). Re-running skips indexes that already exist identically.
+// sessions for one plate per location (P4.3), two completed payments for one
+// session (P4.5 checkout) and two active tariffs per location/vehicle/tariff
+// type (P4.6 settings). Re-running skips indexes that already exist identically.
 /** @typedef {{ name: string, key: Record<string, 1 | -1>, unique?: boolean, partialFilterExpression?: Record<string, unknown> }} PlannedIndex */
-export const parkingIndexPlan = Object.freeze(/** @type {Record<"parkingSessions" | "vehicles" | "parkingTransactions", PlannedIndex[]>} */ ({
+export const parkingIndexPlan = Object.freeze(/** @type {Record<"parkingSessions" | "vehicles" | "parkingTransactions" | "tariffs", PlannedIndex[]>} */ ({
   parkingSessions: [
     { name: "parking_sessions_tenant_location_status_entry", key: { tenantId: 1, locationId: 1, status: 1, entryAt: -1 } },
     { name: "parking_sessions_tenant_location_plate_entry", key: { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1, entryAt: -1 } },
@@ -23,6 +24,9 @@ export const parkingIndexPlan = Object.freeze(/** @type {Record<"parkingSessions
     { name: "parking_transactions_tenant_location_payment", key: { tenantId: 1, locationId: 1, paymentAt: -1 } },
     { name: "parking_transactions_tenant_status_created", key: { tenantId: 1, status: 1, createdAt: -1 } },
     { name: "parking_transactions_tenant_plate_payment", key: { tenantId: 1, plateNumberSnapshot: 1, paymentAt: -1 } },
+  ],
+  tariffs: [
+    { name: "tariffs_location_vehicle_tariff_active_unique", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }, unique: true, partialFilterExpression: { status: "active" } },
   ],
 }));
 export const parkingIndexConfirmation = "CREATE_PARKING_INDEXES";
@@ -45,6 +49,15 @@ function identical(index, planned) {
     && !index.sparse && !index.collation;
 }
 
+/** Duplicate key groups among documents covered by a unique (partial) index.
+ * Aggregation read only; a missing collection yields no rows. Errors stop the run.
+ * @param {import('mongodb').Db} db @param {string} collection @param {PlannedIndex} planned */
+async function countDuplicates(db, collection, planned) {
+  const group = Object.fromEntries(Object.keys(planned.key).map((field) => [field, `$${field}`]));
+  const rows = await db.collection(collection).aggregate([{ $match: planned.partialFilterExpression ?? {} }, { $group: { _id: group, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }, { $count: "groups" }]).toArray();
+  return rows[0]?.groups ?? 0;
+}
+
 /** Create-only: pre-check everything, then create missing indexes one by one,
  * then verify. Never drops, modifies or writes documents. Stops on conflicts.
  * @param {import('mongodb').MongoClient} client @param {{ apply: boolean, database: string }} input */
@@ -61,6 +74,8 @@ export async function applyParkingIndexes(client, input) {
       const byKey = existing.find((index) => index.name !== planned.name && JSON.stringify(index.key) === JSON.stringify(planned.key));
       if (byName && !identical(byName, planned)) throw new Error(`Conflict: ${collection}.${planned.name} exists with different options.`);
       if (byKey) throw new Error(`Conflict: ${collection} already has another index on the same key.`);
+      // Read-only: a unique index still to be created must not meet duplicates.
+      if (!byName && planned.unique && await countDuplicates(db, collection, planned) > 0) throw new Error(`Conflict: ${collection} has documents that violate ${planned.name}.`);
     }
   }
   for (const [collection, plan] of Object.entries(parkingIndexPlan)) {

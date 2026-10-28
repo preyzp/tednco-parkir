@@ -55,6 +55,10 @@ test.each([
   expect(definitionsFor(collection as string)).toContainEqual({ name, key, unique: true });
 });
 
+test("one active tariff per location, vehicle type and tariff type; inactive history is excluded", async () => {
+  await setupDatabaseIndexes();
+  expect(definitionsFor("tariffs")).toEqual([{ name: "tariffs_location_vehicle_tariff_active_unique", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }, unique: true, partialFilterExpression: { status: "active" } }]);
+});
 test("active uniqueness matches normalized snapshot and excludes completed/canceled history", async () => {
   await setupDatabaseIndexes();
   expect(definitionsFor("parkingSessions")).toContainEqual({
@@ -88,7 +92,6 @@ test.each([
   ["parkingSessions", { tenantId: 1, locationId: 1, status: 1, entryAt: -1 }],
   ["parkingSessions", { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1, entryAt: -1 }],
   ["parkingSessions", { tenantId: 1, transactionId: 1 }],
-  ["tariffs", { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1, status: 1 }],
   ["parkingTransactions", { tenantId: 1, locationId: 1, paymentAt: -1 }],
   ["parkingTransactions", { tenantId: 1, status: 1, createdAt: -1 }],
   ["parkingTransactions", { tenantId: 1, plateNumberSnapshot: 1, paymentAt: -1 }],

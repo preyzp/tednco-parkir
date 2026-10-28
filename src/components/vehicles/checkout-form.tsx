@@ -102,7 +102,7 @@ export function CheckoutForm({ quote, backHref }: { quote: CheckoutQuote; backHr
       <Card className="rounded-2xl"><CardContent className="space-y-5">
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">Pilih tarif<span aria-hidden="true" className="text-destructive"> *</span></legend>
-          <p className="text-xs text-muted-foreground">{suggestionText} Jam operasional {quote.policy.openTime.replace(":", ".")}–{quote.policy.closeTime.replace(":", ".")}. Menginap menggantikan tarif reguler.</p>
+          <p className="text-xs text-muted-foreground">{suggestionText} Jam operasional {quote.policy.openTime.replace(":", ".")}–{quote.policy.closeTime.replace(":", ".")} ({quote.policy.source === "location" ? "jam lokasi" : "jam default"}). Menginap menggantikan tarif reguler.</p>
           <RadioGroup value={tariffType} onValueChange={(value) => { setTariffType(value as TariffChoice); setError(null); }} className="grid gap-2 sm:grid-cols-2">
             {option("regular", <Sun aria-hidden="true" className="size-5 text-muted-foreground" />, "Reguler", `${formatRupiah(quote.rates.regular.amount)} · ${rateSourceLabel[quote.rates.regular.source]}`)}
             {option("overnight", <Moon aria-hidden="true" className="size-5 text-muted-foreground" />, "Menginap", `${formatRupiah(quote.rates.overnight.amount)}/malam · ${rateSourceLabel[quote.rates.overnight.source]}`)}

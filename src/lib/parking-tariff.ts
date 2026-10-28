@@ -13,8 +13,8 @@ export interface ParkingRates {
 // Agreed MVP default (operator decision, 2026-10-27), used ONLY when a location
 // has no active tariff for the vehicle type and tariff type. Same for Motor and
 // Mobil. Configured tariffs always win; this is not a production price list.
-// Operating hours: open 05:00, close 00:00 (location time). Locations have no
-// operating-hours setting yet, so the default always applies.
+// Operating hours default: open 05:00, close 00:00 (location time), used when a
+// location has no valid operating-hours setting (all locations before P4.6).
 export const defaultParkingPolicy = Object.freeze({
   regularAmount: 5_000,
   overnightAmountPerNight: 10_000,
@@ -22,11 +22,31 @@ export const defaultParkingPolicy = Object.freeze({
   closeTime: "00:00",
 });
 export const maxNightCount = 999;
+// Settings limits (P4.6): whole Rupiah per tariff, 24-hour "HH:MM" times.
+export const tariffAmountMin = 1;
+export const tariffAmountMax = 10_000_000;
+export const timeOfDayPattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
+export const isTariffAmount = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= tariffAmountMin && (value as number) <= tariffAmountMax;
 
 function minutesOf(time: string): number {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+  const match = timeOfDayPattern.exec(time);
   if (!match) throw new Error("Invalid time of day.");
   return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export type PolicySource = "location" | "default";
+export interface OperatingPolicy { readonly openTime: string; readonly closeTime: string; readonly source: PolicySource }
+// Latest location setting (stored as { mode: "daily", openTime, closeTime }).
+// Missing or malformed settings — including open == close, which the MVP does
+// not allow — fall back to the default: the value only drives the night
+// suggestion, never the charged total (the Owner chooses explicitly).
+export function resolveOperatingPolicy(location: { operatingHours?: unknown } | null | undefined): OperatingPolicy {
+  const hours = location?.operatingHours as { mode?: unknown; openTime?: unknown; closeTime?: unknown } | null | undefined;
+  if (hours && typeof hours === "object" && hours.mode === "daily" && typeof hours.openTime === "string" && typeof hours.closeTime === "string"
+    && timeOfDayPattern.test(hours.openTime) && timeOfDayPattern.test(hours.closeTime) && hours.openTime !== hours.closeTime) {
+    return Object.freeze({ openTime: hours.openTime, closeTime: hours.closeTime, source: "location" as const });
+  }
+  return Object.freeze({ openTime: defaultParkingPolicy.openTime, closeTime: defaultParkingPolicy.closeTime, source: "default" as const });
 }
 function localDateParts(at: Date, timeZone: string) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(at).map((part) => [part.type, part.value]));
@@ -87,6 +107,5 @@ export function calculateCharge(rates: ParkingRates, tariffType: unknown, nightC
   return { ok: true, tariffType, amountPerUnit: rates.overnight.amount, nightCount, totalAmount, source: rates.overnight.source };
 }
 
-export function formatRupiah(amount: number): string {
-  return `Rp${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(amount)}`;
-}
+// Kept for existing imports; the id-ID formatting lives in ./money.
+export { formatRupiah } from "./money";

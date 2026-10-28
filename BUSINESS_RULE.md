@@ -260,13 +260,31 @@ Sistem tidak boleh otomatis mengganti tarif menjadi Menginap hanya karena kendar
 
 Aturan ini disengaja agar petugas tetap dapat menyesuaikan transaksi dengan kondisi operasional sebenarnya.
 
-#### Saran tarif dan kebijakan default MVP (keputusan operator, 2026-10-27)
+#### Tarif, jam operasional, dan saran Menginap (keputusan operator 2026-10-27, final P4.6 2026-10-28)
 
-- Sistem **menyarankan** Reguler atau Menginap beserta jumlah malam; petugas tetap memilih secara eksplisit dan boleh mengubah jumlah malam (bilangan bulat positif). Sistem tidak pernah mengganti tarif sendiri.
-- Jumlah malam yang disarankan = banyaknya jam tutup lokasi (default 00.00) yang terlewati selama parkir, dihitung pada zona waktu lokasi (fallback zona tenant): masuk sebelum jam tutup dan keluar setelahnya. Keluar tepat pada jam tutup tidak dihitung; masuk setelah jam tutup (mis. 02.00) hanya menghitung jam tutup berikutnya. Jam buka default 05.00 hanya informasi.
+**Pengaturan per lokasi**
+
+- Owner mengatur tarif per lokasi dan per jenis kendaraan: Motor dan Mobil, masing-masing Reguler dan Menginap per malam. Lokasi berbeda boleh memiliki tarif berbeda.
+- Nominal tarif berupa bilangan bulat Rupiah **Rp1–Rp10.000.000**.
+- Owner mengatur satu jam buka dan jam tutup **harian** per lokasi (zona waktu lokasi). Jam tutup boleh melewati tengah malam (contoh buka 18.00, tutup 02.00). Jam buka dan jam tutup tidak boleh sama.
+- Belum termasuk MVP: jadwal mingguan (jam berbeda per hari), hari libur, dan lokasi 24 jam.
+- Lokasi yang belum diatur memakai default yang disetujui operator: Reguler Rp5.000 dan Menginap Rp10.000 per malam (sama untuk Motor dan Mobil), jam 05.00–00.00. Default bukan daftar harga produksi; pengaturan lokasi selalu didahulukan, dan sumbernya ("Tarif lokasi"/"Tarif default", "jam lokasi"/"jam default") ditampilkan.
+
+**Saat checkout**
+
+- Tarif dan jam operasional **terbaru** berlaku saat checkout, termasuk untuk kendaraan yang sudah parkir sebelum pengaturan diubah — bukan tarif pada saat kendaraan masuk.
+- Sistem hanya **menyarankan** Reguler atau Menginap beserta jumlah malam. Owner tetap memilih tarif secara manual dan boleh menyesuaikan jumlah malam (bilangan bulat positif). Sistem tidak pernah mengganti tarif sendiri.
+- Saran jumlah malam = banyaknya **jam tutup lokasi yang dilewati** selama parkir: setiap batas jam tutup antara waktu masuk dan waktu keluar dihitung satu malam. Keluar **tepat** pada jam tutup belum dihitung; masuk setelah jam tutup hanya menghitung jam tutup berikutnya. Jam tutup terbaru dipakai untuk seluruh masa parkir sesi yang masih aktif. Jam buka hanya informasi.
 - Menginap **menggantikan** Reguler: total = tarif per malam × jumlah malam.
-- Bila lokasi tidak memiliki tarif aktif untuk jenis kendaraan/jenis tarif, dipakai kebijakan default yang disetujui operator: Reguler Rp5.000 dan Menginap Rp10.000 per malam, sama untuk Motor dan Mobil. Ini bukan daftar harga produksi; tarif aktif lokasi selalu didahulukan, dan sumbernya ("Tarif lokasi"/"Tarif default") ditampilkan serta disimpan pada snapshot transaksi. Lebih dari satu tarif aktif untuk kombinasi yang sama memblokir checkout.
-- Jam operasional per lokasi belum dapat dikonfigurasi; nilai default di atas berlaku untuk semua lokasi sampai pengaturan tersedia.
+- Lebih dari satu tarif aktif untuk kombinasi yang sama, atau nominal di luar batas, memblokir checkout sampai Owner menyimpan ulang pengaturan.
+
+**Setelah checkout**
+
+- Transaksi yang sudah selesai menyimpan snapshot tarif dan jam operasional yang dipakai, dan **tidak berubah** walaupun tarif atau jam diubah kemudian.
+
+**Format nominal**
+
+- Nominal Rupiah ditampilkan dalam format Indonesia (id-ID): titik sebagai pemisah ribuan, koma sebagai pemisah desimal bila diperlukan; tarif tanpa pecahan. Contoh: `Rp5.000`, `Rp10.000.000`. Input tarif menampilkan titik ribuan saat diketik; nilai disimpan sebagai angka bulat.
 
 ### 5.5 Perubahan tarif
 
@@ -712,6 +730,8 @@ Jam operasional tidak secara otomatis:
 - Membuat transaksi pembayaran.
 
 Perubahan jam operasional tidak boleh mengubah transaksi historis.
+
+MVP (P4.6): jam operasional adalah satu jam buka dan jam tutup harian per lokasi, diatur Owner, dan hanya dipakai untuk saran jumlah malam saat checkout (lihat §5.4). Jam terbaru berlaku untuk sesi aktif. Jadwal mingguan, hari libur, dan lokasi 24 jam belum didukung.
 
 ---
 

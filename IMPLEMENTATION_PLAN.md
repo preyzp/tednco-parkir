@@ -304,7 +304,7 @@ Satu user dapat memiliki membership dan role berbeda pada tenant berbeda.
 
 #### Tasks
 
-- [ ] P5.1 — Implementasi tariff configuration.
+- [x] P5.1 — Implementasi tariff configuration. (P4.6 label operator, 2026-10-28: `/app/pengaturan/tarif`, Owner-only, 4 tarif per lokasi, unique partial index aktif diterapkan, audit, revision.)
 - [x] P5.2 — Implementasi tariff lookup per lokasi/jenis kendaraan. (P4.5 label operator, 2026-10-27: tarif aktif lokasi bila ada; jika tidak ada, kebijakan default yang disetujui operator; lebih dari satu tarif aktif → checkout diblokir.)
 - [x] P5.3 — Implementasi regular fee calculation. (`src/lib/parking-tariff.ts`, pure + tes.)
 - [x] P5.4 — Implementasi overnight fee calculation. (Saran jumlah malam dari jam tutup 00.00 zona lokasi; Owner tetap memilih eksplisit.)
@@ -406,7 +406,7 @@ Satu user dapat memiliki membership dan role berbeda pada tenant berbeda.
 - [ ] P7.5 — Implementasi staff/location/payment filters.
 - [ ] P7.6 — Implementasi business profile settings.
 - [ ] P7.7 — Implementasi location settings.
-- [ ] P7.8 — Implementasi operating hours settings.
+- [x] P7.8 — Implementasi operating hours settings. (P4.6, 2026-10-28: jam harian per lokasi untuk saran malam; jadwal mingguan/hari libur/24 jam belum.)
 - [ ] P7.9 — Implementasi staff management.
 - [ ] P7.10 — Implementasi configurable permissions.
 - [ ] P7.11 — Implementasi subscription plan management.

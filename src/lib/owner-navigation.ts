@@ -1,4 +1,4 @@
-import { AUTHENTICATED_PATH, SECURITY_SETTINGS_PATH } from "./login";
+import { AUTHENTICATED_PATH } from "./login";
 import type { TenantRole } from "../types";
 
 // Owner App navigation. Items without `href` are modules that are not built
@@ -14,6 +14,9 @@ export const VEHICLES_PATH = "/app/kendaraan";
 export const VEHICLE_ENTRY_PATH = "/app/kendaraan/masuk";
 // Checkout: active-vehicle search; one session at `${VEHICLE_EXIT_PATH}/<sessionId>`.
 export const VEHICLE_EXIT_PATH = "/app/kendaraan/keluar";
+// Settings hub (P4.6) and its location tariff/operating-hours page.
+export const SETTINGS_PATH = "/app/pengaturan";
+export const TARIFF_SETTINGS_PATH = "/app/pengaturan/tarif";
 export const ownerNavigation: readonly OwnerNavItem[] = [
   // "Beranda" is the dashboard and home of the quick actions (entry/exit).
   { key: "dashboard", label: "Beranda", href: AUTHENTICATED_PATH },
@@ -22,8 +25,8 @@ export const ownerNavigation: readonly OwnerNavItem[] = [
   { key: "transaksi", label: "Transaksi" },
   { key: "prabayar", label: "Prabayar" },
   { key: "laporan", label: "Laporan" },
-  // Only "Keamanan akun" exists so far, and it is Owner-only (server-guarded).
-  { key: "pengaturan", label: "Pengaturan", href: SECURITY_SETTINGS_PATH, ownerOnly: true },
+  // Hub: Tarif & Jam Operasional, Keamanan Akun. Owner-only (server-guarded).
+  { key: "pengaturan", label: "Pengaturan", href: SETTINGS_PATH, ownerOnly: true },
 ];
 export function visibleOwnerNavigation(role: TenantRole): readonly OwnerNavItem[] {
   return ownerNavigation.filter((item) => !item.ownerOnly || role === "owner");

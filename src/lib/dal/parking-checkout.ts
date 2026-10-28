@@ -3,7 +3,7 @@ import { MongoServerError, ObjectId, type ClientSession, type Db } from "mongodb
 import { getDb, getMongoClient } from "../mongodb";
 import { AppError } from "../errors";
 import { safeTimeZone } from "../time";
-import { calculateCharge, countNights, defaultParkingPolicy, suggestTariff, type ParkingRates } from "../parking-tariff";
+import { calculateCharge, countNights, defaultParkingPolicy, isTariffAmount, resolveOperatingPolicy, suggestTariff, type OperatingPolicy, type ParkingRates } from "../parking-tariff";
 import { checkoutConfirmSchema, type CheckoutConfirmInput } from "../validations/parking-checkout";
 import { requirePermission, type AuthorizationSelection, type LocationContext } from "./authorization";
 import type { TariffType, VehicleType } from "../../types";
@@ -24,7 +24,8 @@ export interface CheckoutQuote {
   readonly nights: number;
   readonly suggestion: { readonly tariffType: TariffType; readonly nightCount: number };
   readonly rates: ParkingRates;
-  readonly policy: { readonly openTime: string; readonly closeTime: string };
+  // Latest location operating hours (or the default) used for the suggestion.
+  readonly policy: OperatingPolicy;
 }
 export interface CheckoutReceipt {
   readonly plateNumber: string;
@@ -90,7 +91,7 @@ async function resolveRates(db: Db, context: LocationContext, vehicleType: Vehic
   const pick = (tariffType: TariffType, fallback: number) => {
     const matching = rows.filter((row) => row.tariffType === tariffType);
     if (matching.length === 0) return { amount: fallback, source: "default" as const };
-    if (matching.length > 1 || !Number.isSafeInteger(matching[0].amount) || matching[0].amount <= 0) return null;
+    if (matching.length > 1 || !isTariffAmount(matching[0].amount)) return null;
     return { amount: matching[0].amount as number, source: "location" as const };
   };
   const regular = pick("regular", defaultParkingPolicy.regularAmount);
@@ -100,11 +101,12 @@ async function resolveRates(db: Db, context: LocationContext, vehicleType: Vehic
 
 async function loadScope(db: Db, context: LocationContext, options: Options) {
   const tenant = await db.collection("tenants").findOne({ _id: context.tenantId, status: "active" }, { ...options, projection: { timezone: 1 } });
-  const location = await db.collection("locations").findOne({ _id: context.locationId, tenantId: context.tenantId, status: "active" }, { ...options, projection: { name: 1, timezone: 1 } });
+  const location = await db.collection("locations").findOne({ _id: context.locationId, tenantId: context.tenantId, status: "active" }, { ...options, projection: { name: 1, timezone: 1, operatingHours: 1 } });
   if (!tenant || !location) throw new AppError("FORBIDDEN");
   // Location time zone first (BUSINESS_RULE: location business time), then tenant.
   const timeZone = safeTimeZone(typeof location.timezone === "string" && location.timezone ? location.timezone : tenant.timezone);
-  return { timeZone, locationName: typeof location.name === "string" ? location.name : "" };
+  // Latest operating hours apply to every active vehicle at checkout time.
+  return { timeZone, locationName: typeof location.name === "string" ? location.name : "", policy: resolveOperatingPolicy({ operatingHours: location.operatingHours }) };
 }
 
 type SessionRow = { _id: ObjectId; plateNumberSnapshot?: unknown; vehicleTypeSnapshot?: unknown; entryAt?: unknown; exitAt?: unknown; status?: unknown };
@@ -145,11 +147,11 @@ export async function getParkingCheckout(selection: AuthorizationSelection, rawS
     if (!await hasCompletedTransactionIndex(db)) return { kind: "not_ready" };
     const rates = await resolveRates(db, context, session.vehicleTypeSnapshot, {});
     if (!rates) return { kind: "tariff_unavailable" };
-    const nights = countNights(session.entryAt, now, scope.timeZone, defaultParkingPolicy.closeTime);
+    const nights = countNights(session.entryAt, now, scope.timeZone, scope.policy.closeTime);
     return { kind: "active", quote: Object.freeze({
       sessionId: sessionId.toHexString(), plateNumber: session.plateNumberSnapshot, vehicleType: session.vehicleTypeSnapshot, locationName: scope.locationName,
       entryAt: session.entryAt.toISOString(), quotedAt: now.toISOString(), timeZone: scope.timeZone, nights, suggestion: suggestTariff(nights), rates,
-      policy: { openTime: defaultParkingPolicy.openTime, closeTime: defaultParkingPolicy.closeTime },
+      policy: scope.policy,
     }) };
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -225,6 +227,9 @@ export async function completeParkingCheckout(selection: AuthorizationSelection,
         _id: transactionId, tenantId: context.tenantId, locationId: context.locationId, parkingSessionId: sessionId,
         plateNumberSnapshot: row.plateNumberSnapshot, vehicleTypeSnapshot: row.vehicleTypeSnapshot, tariffSnapshot,
         paymentMethod: "cash", amountDue: charge.totalAmount, amountPaid: charge.totalAmount, status: "completed",
+        // Hours behind the night suggestion at confirmation time (P4.6); older
+        // transactions have no policySnapshot and stay valid.
+        policySnapshot: { openTime: scope.policy.openTime, closeTime: scope.policy.closeTime, source: scope.policy.source },
         processedBy: context.userId, paymentAt: now, idempotencyKey: input.idempotencyKey, createdAt: now, updatedAt: now,
       }, options);
       const updated = await database.collection("parkingSessions").updateOne(

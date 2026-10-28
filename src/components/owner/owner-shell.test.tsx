@@ -14,7 +14,7 @@ describe("navigation", () => {
     const markup = render();
     const hrefs = anchors(markup).map((tag) => /href="([^"]+)"/.exec(tag)?.[1]);
     const linkContents = [...markup.matchAll(/<a [^>]*>(.*?)<\/a>/g)].map((match) => match[1]);
-    expect(hrefs).toEqual(expect.arrayContaining(["/app", "/app/kendaraan", "/app/pengaturan/keamanan", "/app/pilih-lokasi"]));
+    expect(hrefs).toEqual(expect.arrayContaining(["/app", "/app/kendaraan", "/app/pengaturan", "/app/pilih-lokasi"]));
     // Sidebar "Kendaraan" opens the list, not the entry form.
     expect(hrefs).not.toContain("/app/kendaraan/masuk");
     expect(markup).toContain(">Beranda<"); expect(markup).not.toContain(">Dashboard<");
@@ -26,11 +26,11 @@ describe("navigation", () => {
   it("marks the current section with aria-current", () => {
     const current = (markup: string) => anchors(markup).filter((tag) => tag.includes('aria-current="page"')).map((tag) => /href="([^"]+)"/.exec(tag)?.[1]);
     expect(current(render())).toEqual(["/app"]);
-    expect(current(render({}, "pengaturan"))).toEqual(["/app/pengaturan/keamanan"]);
+    expect(current(render({}, "pengaturan"))).toEqual(["/app/pengaturan"]);
     expect(current(render({}, "kendaraan"))).toEqual(["/app/kendaraan"]);
   });
   it("hides Owner-only vehicle entry and settings from non-Owner roles", () => {
-    for (const role of ["admin", "staff"] as const) { const markup = render({ role }); expect(markup).not.toContain("/app/pengaturan/keamanan"); expect(markup).not.toContain('href="/app/kendaraan"'); }
+    for (const role of ["admin", "staff"] as const) { const markup = render({ role }); expect(markup).not.toContain("/app/pengaturan"); expect(markup).not.toContain('href="/app/kendaraan"'); }
   });
   it("is responsive: sidebar from lg up, menu trigger below lg", () => {
     const markup = render();

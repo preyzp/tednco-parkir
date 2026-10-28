@@ -59,9 +59,9 @@ it("home renders the Owner shell with the verified location, tenant and profile,
 });
 it("shows Pengaturan (account security) only to Owners", async () => {
   mocks.resolve.mockResolvedValue({ ...active, workspace: { ...active.workspace, role: "owner" } });
-  expect(await html(WorkspaceHome)).toContain('href="/app/pengaturan/keamanan"');
+  expect(await html(WorkspaceHome)).toContain('href="/app/pengaturan"');
   mocks.resolve.mockResolvedValue(active);
-  expect(await html(WorkspaceHome)).not.toContain("/app/pengaturan/keamanan");
+  expect(await html(WorkspaceHome)).not.toContain("/app/pengaturan");
 });
 it("redirects to login if the session ended after the workspace was resolved, and fails safely on errors", async () => {
   mocks.resolve.mockResolvedValue(active);
@@ -75,7 +75,7 @@ it("OwnerAppFrame wraps a page in the shell only for an active workspace and nev
   mocks.resolve.mockResolvedValue({ ...active, workspace: { ...active.workspace, role: "owner" } });
   const shell = renderToStaticMarkup(await OwnerAppFrame({ section: "pengaturan", children: "[Halaman]" }));
   expect(shell).toContain("[Halaman]"); expect(shell).toContain("Navigasi utama");
-  expect(shell).toMatch(/aria-current="page"[^>]*href="\/app\/pengaturan\/keamanan"|href="\/app\/pengaturan\/keamanan"[^>]*aria-current="page"/);
+  expect(shell).toMatch(/aria-current="page"[^>]*href="\/app\/pengaturan"|href="\/app\/pengaturan"[^>]*aria-current="page"/);
   for (const state of [{ status: "selection_required", workspaces }, { status: "forbidden", workspaces }, { status: "empty", platformAdmin: false }]) {
     mocks.resolve.mockResolvedValue(state);
     const plain = renderToStaticMarkup(await OwnerAppFrame({ section: "pengaturan", children: "[Halaman]" }));

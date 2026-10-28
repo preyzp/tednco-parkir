@@ -174,13 +174,13 @@ interface Location {
   name: string;
   address?: string;
   timezone: string;
+  // MVP (P4.6): satu jam harian, waktu lokal lokasi, "HH:MM" 24 jam.
   operatingHours?: {
-    [day: string]: {
-      open: string;
-      close: string;
-      isClosed: boolean;
-    };
+    mode: "daily";
+    openTime: string;  // contoh "05:00"
+    closeTime: string; // contoh "00:00" atau "02:00" (boleh melewati tengah malam)
   };
+  settingsRevision?: number; // naik 1 setiap penyimpanan pengaturan
   status: "active" | "inactive";
   createdAt: Date;
   updatedAt: Date;
@@ -193,6 +193,9 @@ Ketentuan:
 - Semua operasi lokasi harus memverifikasi kepemilikan tenant.
 - Zona waktu lokasi dapat mengikuti konfigurasi tenant jika tidak ditetapkan secara khusus.
 - Jam operasional tidak otomatis mengubah tarif atau status sesi parkir.
+- `operatingHours` hanya dipakai untuk **rekomendasi** jumlah malam saat checkout (jam tutup), tidak untuk menghitung total. `openTime` ≠ `closeTime`; lokasi 24 jam belum didukung.
+- Kompatibilitas: lokasi tanpa `operatingHours` (atau dengan nilai tidak valid, termasuk format per-hari lama) memakai default 05:00–00:00. `settingsRevision` yang belum ada dianggap 0.
+- `settingsRevision` adalah kunci optimistic concurrency: penyimpanan memperbarui lokasi secara bersyarat pada revision yang dimuat form; revision berbeda → konflik tanpa write.
 
 Index:
 
@@ -444,9 +447,16 @@ Ketentuan:
 
 Index:
 
-- `{ tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1, status: 1 }`
+- Unique partial `tariffs_location_vehicle_tariff_active_unique`: `{ tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }` dengan `partialFilterExpression: { status: "active" }` — tepat satu tarif aktif per kombinasi; dokumen `inactive` (riwayat) tidak dibatasi. Menggantikan rencana index non-unique `{ …, status: 1 }` yang tidak pernah diterapkan.
 
 Jika aplikasi membutuhkan lebih dari satu versi tarif aktif, tentukan aturan tanggal berlaku sebelum implementasi. Untuk MVP, hindari ambiguitas dengan memastikan pemilihan tarif aktif konsisten.
+
+Implementasi P4.6 (2026-10-28, Pengaturan Owner):
+
+- Empat kombinasi per lokasi: Motor/Mobil × `regular`/`overnight` (`overnight` = per malam). `amount` integer Rp1–Rp10.000.000, `currency: "IDR"`.
+- Penyimpanan (Owner, lokasi dari workspace terverifikasi) dalam satu transaksi MongoDB: update bersyarat lokasi (`operatingHours`, `settingsRevision`), upsert empat tarif (dokumen aktif diperbarui di tempat; yang belum ada di-insert; duplikat aktif lama diubah `inactive`, tidak dihapus), dan satu audit `location.settings.update`. Penyimpanan ditolak (fail closed) sampai unique partial index di atas tersedia.
+- Kompatibilitas: kombinasi tanpa tarif aktif memakai default (Reguler Rp5.000, Menginap Rp10.000/malam). Lebih dari satu tarif aktif atau nominal di luar batas untuk satu kombinasi memblokir checkout (`tariff_unavailable`) sampai disimpan ulang.
+- Riwayat nilai tarif tercatat di audit (before/after), bukan sebagai dokumen versi.
 
 ---
 
@@ -516,6 +526,8 @@ Implementasi P4.5 (2026-10-27, checkout Tunai Owner):
 - Field tambahan: `idempotencyKey` (UUID dari layar checkout; retry identik oleh aktor yang sama mengembalikan hasil sebelumnya) dan `tariffSnapshot.source` (`"location"` | `"default"`). Pengamanan setara koleksi `idempotencyKeys` untuk operasi ini: satu sesi hanya dapat diselesaikan sekali, sehingga key cukup disimpan pada dokumen transaksi final.
 - Satu transaksi MongoDB: insert transaksi `completed` + update bersyarat sesi (`status: "active"` → `completed`, `exitAt`, `completedBy`, `transactionId`) + audit `parking.checkout`. Checkout ditolak (fail closed) sampai unique partial index `{ tenantId, parkingSessionId }` (`status: "completed"`) tersedia.
 - MVP tunai: `amountDue = amountPaid = total`; `cashReceived`/`changeAmount` tidak diisi.
+- P4.6: transaksi baru menyimpan `policySnapshot: { openTime, closeTime, source: "location" | "default" }` — jam operasional yang mendasari rekomendasi malam saat konfirmasi. `tariffSnapshot` tetap menyimpan nominal yang dibayar. Kompatibilitas: transaksi lama tanpa `policySnapshot` tetap valid dan terbaca.
+- Snapshot bersifat final: perubahan tarif atau jam operasional setelahnya tidak mengubah transaksi `completed`. Checkout memakai tarif dan jam **terbaru** saat konfirmasi (snapshot transaksi checkout); total yang ditampilkan dicek ulang di server dan selisih ditolak (`price_changed`).
 
 ---
 
@@ -643,6 +655,9 @@ interface AuditLog {
 Ketentuan:
 
 - Gunakan action yang konsisten dan terdokumentasi.
+- Action terdokumentasi saat ini antara lain:
+  - `parking.checkout` — `entityType: "parkingSession"`; before `{ status }`, after `{ status, transactionId, tariffType, nightCount, totalAmount, paymentMethod, exitAt }`.
+  - `location.settings.update` — `entityType: "location"`, `entityId` = lokasi; before/after `{ revision, operatingHours: { openTime, closeTime } | null, tariffs: { motor: { regular, overnight }, mobil: { regular, overnight } } }` dengan nominal `null` = belum diatur (default). Tepat satu entri per penyimpanan berhasil.
 - Hindari menyimpan informasi sensitif yang tidak diperlukan.
 - Jangan mencatat password, token sesi, atau rahasia autentikasi.
 - Catatan audit finansial harus dapat ditelusuri ke transaksi terkait.

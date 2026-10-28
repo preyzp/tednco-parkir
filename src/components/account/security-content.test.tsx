@@ -34,9 +34,9 @@ it("shows a safe unavailable state", async () => {
   expect(markup).toContain("Layanan belum tersedia");
   expect(markup).not.toContain("synthetic"); expect(markup).not.toContain("[FormPassword]");
 });
-it("offers 'Kembali' to Beranda above the title (no /app/pengaturan hub exists yet)", async () => {
+it("offers 'Kembali' to the Pengaturan hub above the title", async () => {
   mocks.owner.mockResolvedValue(undefined);
   const markup = await render();
-  expect(markup).toMatch(/<a[^>]*aria-label="Kembali ke Beranda"[^>]*href="\/app"[^>]*>.*?Kembali<\/a>/);
+  expect(markup).toMatch(/<a[^>]*aria-label="Kembali ke Pengaturan"[^>]*href="\/app\/pengaturan"[^>]*>.*?Kembali<\/a>/);
   expect(markup.indexOf("Kembali")).toBeLessThan(markup.indexOf("<h1"));
 });

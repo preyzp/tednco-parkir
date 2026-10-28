@@ -35,7 +35,9 @@ function indexDefinitions(): Record<keyof typeof collectionNames, IndexDescripti
       { name: "parking_sessions_active_plate_unique", key: { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1 }, unique: true, partialFilterExpression: { status: "active" } },
     ],
     tariffs: [
-      { name: "tariffs_tenant_location_vehicle_tariff_status", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1, status: 1 } },
+      // One active tariff per location/vehicle/tariff type (P4.6). Replaces the
+      // never-applied non-unique status index; its prefix serves checkout lookups.
+      { name: "tariffs_location_vehicle_tariff_active_unique", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }, unique: true, partialFilterExpression: { status: "active" } },
     ],
     parkingTransactions: [
       { name: "parking_transactions_completed_session_unique", key: { tenantId: 1, parkingSessionId: 1 }, unique: true, partialFilterExpression: { status: "completed" } },

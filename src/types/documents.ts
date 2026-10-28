@@ -24,9 +24,10 @@ export interface Location {
   name: string;
   address?: string;
   timezone: string;
-  operatingHours?: {
-    [day: string]: { open: string; close: string; isClosed: boolean };
-  };
+  // MVP (P4.6): one daily open/close time ("HH:MM", location time, open != close).
+  // Absent on older locations: the default 05:00–00:00 applies.
+  operatingHours?: { mode: "daily"; openTime: string; closeTime: string };
+  settingsRevision?: number;
   status: LocationStatus;
   createdAt: Date;
   updatedAt: Date;

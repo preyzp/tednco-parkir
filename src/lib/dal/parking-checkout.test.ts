@@ -159,6 +159,7 @@ describe("successful checkout (atomic)", () => {
     const transaction = data.parkingTransactions[0];
     expect(transaction).toMatchObject({ tenantId: t1, locationId: l1, parkingSessionId: s1, plateNumberSnapshot: "B 1234 XYZ", vehicleTypeSnapshot: "mobil", paymentMethod: "cash", amountDue: 10_000, amountPaid: 10_000, status: "completed", processedBy: userId, paymentAt: serverNow, idempotencyKey: key });
     expect(transaction.tariffSnapshot).toEqual({ tariffType: "overnight", amountPerUnit: 10_000, nightCount: 1, totalAmount: 10_000, currency: "IDR", source: "default" });
+    expect(transaction.policySnapshot).toEqual({ openTime: "05:00", closeTime: "00:00", source: "default" });
     expect(s1Row()).toMatchObject({ status: "completed", exitAt: serverNow, completedBy: userId, transactionId: transaction._id });
     expect(data.auditLogs).toHaveLength(1);
     expect(data.auditLogs[0]).toMatchObject({ tenantId: t1, locationId: l1, actorId: userId, action: "parking.checkout", entityType: "parkingSession", entityId: s1, before: { status: "active" } });
@@ -259,7 +260,7 @@ describe("checkout view", () => {
     expect(view).toEqual({ kind: "active", quote: {
       sessionId: s1.toHexString(), plateNumber: "B 1234 XYZ", vehicleType: "mobil", locationName: "Lokasi Utara", entryAt: "2026-10-26T03:00:00.000Z",
       quotedAt: serverNow.toISOString(), timeZone: "Asia/Jakarta", nights: 1, suggestion: { tariffType: "overnight", nightCount: 1 },
-      rates: { regular: { amount: 5_000, source: "default" }, overnight: { amount: 10_000, source: "default" } }, policy: { openTime: "05:00", closeTime: "00:00" },
+      rates: { regular: { amount: 5_000, source: "default" }, overnight: { amount: 10_000, source: "default" } }, policy: { openTime: "05:00", closeTime: "00:00", source: "default" },
     } });
     expect(JSON.stringify(view)).not.toMatch(/tenantId|locationId|enteredBy|vehicleId/);
   });
@@ -277,5 +278,59 @@ describe("checkout view", () => {
   it("sanitizes storage failures", async () => {
     mocks.db.mockRejectedValue(new Error("synthetic secret"));
     await expect(getParkingCheckout(selection, s1.toHexString())).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+});
+
+describe("location operating hours (P4.6)", () => {
+  // 26 Oct 23:00 WIB: past a 22:00 closing, not yet past the default 00:00.
+  const lateEvening = new Date("2026-10-26T16:00:00Z");
+  it("an older location without operatingHours keeps the default 00:00 behaviour", async () => {
+    expect(await getParkingCheckout(selection, s1.toHexString(), lateEvening)).toMatchObject({ kind: "active", quote: { nights: 0, suggestion: { tariffType: "regular" }, policy: { openTime: "05:00", closeTime: "00:00", source: "default" } } });
+  });
+  it("the location closing time drives the suggestion (22:00 passed → 1 night)", async () => {
+    data.locations[0].operatingHours = { mode: "daily", openTime: "06:00", closeTime: "22:00" };
+    expect(await getParkingCheckout(selection, s1.toHexString(), lateEvening)).toMatchObject({ kind: "active", quote: { nights: 1, suggestion: { tariffType: "overnight", nightCount: 1 }, policy: { openTime: "06:00", closeTime: "22:00", source: "location" } } });
+    // Exactly at 22:00 WIB is not past the closing yet.
+    expect(await getParkingCheckout(selection, s1.toHexString(), new Date("2026-10-26T15:00:00Z"))).toMatchObject({ quote: { nights: 0 } });
+  });
+  it("a past-midnight closing (02:00) counts each 02:00 passed", async () => {
+    data.locations[0].operatingHours = { mode: "daily", openTime: "18:00", closeTime: "02:00" };
+    // Entry 26 Oct 10:00 WIB → 28 Oct 03:00 WIB passes 27 and 28 Oct 02:00.
+    expect(await getParkingCheckout(selection, s1.toHexString(), new Date("2026-10-27T20:00:00Z"))).toMatchObject({ quote: { nights: 2, policy: { closeTime: "02:00", source: "location" } } });
+  });
+  it("a malformed stored setting falls back to the default instead of failing", async () => {
+    data.locations[0].operatingHours = { mode: "daily", openTime: "05:00", closeTime: "05:00" };
+    expect(await getParkingCheckout(selection, s1.toHexString(), lateEvening)).toMatchObject({ quote: { nights: 0, policy: { source: "default" } } });
+  });
+  it("stores the location hours as policySnapshot; the total stays the Owner's explicit choice", async () => {
+    data.locations[0].operatingHours = { mode: "daily", openTime: "06:00", closeTime: "22:00" };
+    // Owner chooses Reguler although the suggestion is Menginap: allowed, charged Rp5.000.
+    expect(await confirm({ tariffType: "regular", nightCount: undefined, expectedTotal: 5_000 })).toMatchObject({ ok: true, receipt: { tariffType: "regular", totalAmount: 5_000 } });
+    expect(data.parkingTransactions[0].policySnapshot).toEqual({ openTime: "06:00", closeTime: "22:00", source: "location" });
+    expect(data.parkingTransactions[0].tariffSnapshot).toMatchObject({ tariffType: "regular", amountPerUnit: 5_000, totalAmount: 5_000, source: "default" });
+  });
+  it("later setting changes never alter a completed transaction", async () => {
+    await confirm();
+    const before = structuredClone(data.parkingTransactions[0]);
+    data.locations[0].operatingHours = { mode: "daily", openTime: "06:00", closeTime: "22:00" };
+    data.tariffs.push({ _id: new ObjectId(), tenantId: t1, locationId: l1, vehicleType: "mobil", tariffType: "overnight", amount: 50_000, status: "active" });
+    expect(await getParkingCheckout(selection, s1.toHexString())).toMatchObject({ kind: "completed", receipt: { amountPerUnit: 10_000, totalAmount: 10_000 } });
+    expect(await confirm()).toMatchObject({ ok: true, replayed: true, receipt: { totalAmount: 10_000 } });
+    expect(data.parkingTransactions).toEqual([before]);
+  });
+  it("older completed transactions without policySnapshot stay readable and replayable", async () => {
+    const txId = new ObjectId(); const paidAt = new Date("2026-10-26T12:00:00Z");
+    Object.assign(s1Row(), { status: "completed", exitAt: paidAt, completedBy: userId, transactionId: txId });
+    data.parkingTransactions.push({ _id: txId, tenantId: t1, locationId: l1, parkingSessionId: s1, status: "completed", paymentMethod: "cash", amountDue: 5_000, amountPaid: 5_000, processedBy: userId, paymentAt: paidAt, idempotencyKey: key,
+      tariffSnapshot: { tariffType: "regular", amountPerUnit: 5_000, totalAmount: 5_000, currency: "IDR", source: "default" } });
+    expect(await getParkingCheckout(selection, s1.toHexString())).toMatchObject({ kind: "completed", receipt: { tariffType: "regular", totalAmount: 5_000 } });
+    expect(await confirm({ tariffType: "regular", nightCount: undefined, expectedTotal: 5_000 })).toMatchObject({ ok: true, replayed: true });
+    expect(data.parkingTransactions).toHaveLength(1);
+  });
+  it("a stored tariff above Rp10.000.000 is treated as invalid configuration", async () => {
+    data.tariffs.push({ _id: new ObjectId(), tenantId: t1, locationId: l1, vehicleType: "mobil", tariffType: "regular", amount: 10_000_001, status: "active" });
+    expect(await getParkingCheckout(selection, s1.toHexString())).toEqual({ kind: "tariff_unavailable" });
+    expect(await confirm({ tariffType: "regular", nightCount: undefined, expectedTotal: 10_000_001 })).toEqual({ ok: false, reason: "tariff_unavailable" });
+    writesUntouched();
   });
 });

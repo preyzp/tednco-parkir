@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCharge, countNights, defaultParkingPolicy, formatRupiah, maxNightCount, suggestTariff, type ParkingRates } from "./parking-tariff";
+import { calculateCharge, countNights, defaultParkingPolicy, formatRupiah, isTariffAmount, maxNightCount, resolveOperatingPolicy, suggestTariff, type ParkingRates } from "./parking-tariff";
 
 const rates: ParkingRates = { regular: { amount: 5_000, source: "default" }, overnight: { amount: 10_000, source: "default" } };
 // Asia/Jakarta = UTC+7: local 00:00 on 27 Oct = 2026-10-26T17:00Z.
@@ -75,4 +75,64 @@ describe("charge (server-authoritative total)", () => {
 it("formats Rupiah without decimals", () => {
   expect(formatRupiah(5_000)).toBe("Rp5.000");
   expect(formatRupiah(120_000)).toBe("Rp120.000");
+});
+
+describe("location closing time (Asia/Jakarta, P4.6)", () => {
+  const n = (entry: string, exit: string, close: string) => countNights(wib(entry), wib(exit), "Asia/Jakarta", close);
+  it.each([
+    // close, entry, exit just before / exactly at / just after the closing time
+    ["00:00", "2026-10-26T20:00", "2026-10-26T23:59:59", 0],
+    ["00:00", "2026-10-26T20:00", "2026-10-27T00:00:00", 0],
+    ["00:00", "2026-10-26T20:00", "2026-10-27T00:00:01", 1],
+    ["22:00", "2026-10-26T08:00", "2026-10-26T21:59:59", 0],
+    ["22:00", "2026-10-26T08:00", "2026-10-26T22:00:00", 0],
+    ["22:00", "2026-10-26T08:00", "2026-10-26T22:00:01", 1],
+    ["02:00", "2026-10-26T19:00", "2026-10-27T01:59:59", 0],
+    ["02:00", "2026-10-26T19:00", "2026-10-27T02:00:00", 0],
+    ["02:00", "2026-10-26T19:00", "2026-10-27T02:00:01", 1],
+    ["23:59", "2026-10-26T10:00", "2026-10-26T23:58:59", 0],
+    ["23:59", "2026-10-26T10:00", "2026-10-26T23:59:00", 0],
+    ["23:59", "2026-10-26T10:00", "2026-10-27T00:00:00", 1],
+  ])("close %s: %s → %s = %i", (close, entry, exit, expected) => {
+    expect(n(entry, exit, close)).toBe(expected);
+  });
+  it.each([
+    ["22:00", "2026-10-26T08:00", "2026-10-28T23:00", 3],
+    ["02:00", "2026-10-26T19:00", "2026-10-29T03:00", 3], // past-midnight closing: 27, 28, 29 at 02:00
+    ["23:59", "2026-10-30T12:00", "2026-11-02T09:00", 3], // month boundary
+    ["22:00", "2026-12-31T21:00", "2027-01-01T23:00", 2], // year boundary: 31 Dec 22:00 and 1 Jan 22:00
+    ["02:00", "2026-12-31T23:00", "2027-01-01T03:00", 1],
+  ])("several nights (close %s): %s → %s = %i", (close, entry, exit, expected) => {
+    expect(n(entry, exit, close)).toBe(expected);
+  });
+  it("entering after the closing time only counts the next closing (close 22:00)", () => {
+    expect(n("2026-10-26T23:00", "2026-10-27T21:00", "22:00")).toBe(0);
+    expect(n("2026-10-26T23:00", "2026-10-27T22:30", "22:00")).toBe(1);
+  });
+  it("the latest closing time applies to the whole stay of an active vehicle", () => {
+    // Same stay, closing changed from 00:00 to 22:00 before checkout.
+    expect(n("2026-10-26T21:00", "2026-10-26T23:00", "00:00")).toBe(0);
+    expect(n("2026-10-26T21:00", "2026-10-26T23:00", "22:00")).toBe(1);
+  });
+});
+
+describe("resolveOperatingPolicy", () => {
+  it("uses a valid daily location setting", () => {
+    expect(resolveOperatingPolicy({ operatingHours: { mode: "daily", openTime: "18:00", closeTime: "02:00" } })).toEqual({ openTime: "18:00", closeTime: "02:00", source: "location" });
+  });
+  it.each([
+    ["no setting (older location)", {}],
+    ["null location", null],
+    ["legacy per-day shape", { operatingHours: { monday: { open: "05:00", close: "22:00", isClosed: false } } }],
+    ["open equals close", { operatingHours: { mode: "daily", openTime: "05:00", closeTime: "05:00" } }],
+    ["invalid time", { operatingHours: { mode: "daily", openTime: "5:00", closeTime: "24:00" } }],
+    ["unknown mode", { operatingHours: { mode: "weekly", openTime: "05:00", closeTime: "22:00" } }],
+  ])("falls back to the default 05:00–00:00: %s", (_label, location) => {
+    expect(resolveOperatingPolicy(location)).toEqual({ openTime: "05:00", closeTime: "00:00", source: "default" });
+  });
+});
+
+it("tariff amount bounds: integer Rp1–Rp10.000.000", () => {
+  for (const ok of [1, 5_000, 10_000_000]) expect(isTariffAmount(ok)).toBe(true);
+  for (const bad of [0, -1, 10_000_001, 2_500.5, Number.NaN, "5000", undefined]) expect(isTariffAmount(bad)).toBe(false);
 });

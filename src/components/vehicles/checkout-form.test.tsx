@@ -15,7 +15,7 @@ const quote = {
   entryAt: "2026-10-26T03:00:00.000Z", quotedAt: "2026-10-27T01:00:00.000Z", timeZone: "Asia/Jakarta", nights: 1,
   suggestion: { tariffType: "overnight" as const, nightCount: 1 },
   rates: { regular: { amount: 5_000, source: "default" as const }, overnight: { amount: 10_000, source: "default" as const } },
-  policy: { openTime: "05:00", closeTime: "00:00" },
+  policy: { openTime: "05:00", closeTime: "00:00", source: "default" as const },
 };
 const receipt = { plateNumber: "B 1234 XYZ", vehicleType: "mobil" as const, locationName: "Lokasi Utara", entryAt: quote.entryAt, exitAt: "2026-10-27T01:01:00.000Z", timeZone: "Asia/Jakarta", tariffType: "overnight" as const, nightCount: 1, amountPerUnit: 10_000, totalAmount: 10_000, paymentMethod: "cash" as const };
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; };
@@ -32,6 +32,13 @@ describe("details and calculation (display only)", () => {
     expect(screen.getByText(/Saran sistem: Menginap 1 malam/)).toBeTruthy();
     expect((screen.getByRole("radio", { name: /Menginap/ }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");
     expect(total()).toBe("Rp10.000");
+    expect(screen.getByText(/Jam operasional 05\.00–00\.00 \(jam default\)/)).toBeTruthy();
+  });
+  it("names the location's own operating hours as the suggestion basis", () => {
+    render(<CheckoutForm quote={{ ...quote, nights: 2, suggestion: { tariffType: "overnight", nightCount: 2 }, policy: { openTime: "18:00", closeTime: "02:00", source: "location" } }} backHref="/app/kendaraan" />);
+    expect(screen.getByText(/Saran sistem: Menginap 2 malam \(melewati jam tutup 02\.00\)/)).toBeTruthy();
+    expect(screen.getByText(/Jam operasional 18\.00–02\.00 \(jam lokasi\)/)).toBeTruthy();
+    expect(total()).toBe("Rp20.000");
   });
   it("Reguler is Rp5.000; Menginap replaces it at nights × rate", () => {
     render(<CheckoutForm quote={quote} backHref="/app/kendaraan" />);

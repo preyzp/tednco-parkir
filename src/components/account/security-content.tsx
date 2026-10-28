@@ -6,6 +6,7 @@ import { AppError } from "../../lib/errors";
 import { requireOwnerAccount } from "../../lib/dal";
 import { AUTHENTICATED_PATH, LOGIN_PATH } from "../../lib/login";
 import { LogoutButton } from "../auth/logout-button";
+import { SETTINGS_PATH } from "../../lib/owner-navigation";
 import { BackLink } from "../back-link";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -29,7 +30,7 @@ export async function SecuritySettingsContent() {
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <BackLink href={AUTHENTICATED_PATH} to="Beranda" />
+        <BackLink href={SETTINGS_PATH} to="Pengaturan" />
         <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><ShieldCheck aria-hidden="true" className="size-6 text-primary" />Keamanan akun</h1>
         <p className="text-sm text-muted-foreground">Ganti password akun Owner Anda. Password saat ini wajib diisi untuk verifikasi.</p>
       </div>

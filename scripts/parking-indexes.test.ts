@@ -9,11 +9,13 @@ vi.mock("../src/lib/mongodb", () => ({ getDb: async () => ({ collection: (name: 
 
 const env = () => ({ NODE_ENV: "development" as const, TEDNCO_ENABLE_DEV_PROVISIONING: "1", MONGODB_DB_NAME: developmentDatabase, TEDNCO_DEV_WRITE_CONFIRMATION: parkingIndexConfirmation, MONGODB_URI: "mongodb://localhost:27017" });
 type Index = Record<string, unknown>;
-function fakeClient(initial: Record<string, Index[]> = {}) {
+function fakeClient(initial: Record<string, Index[]> = {}, duplicates: Record<string, number> = {}) {
   const store: Record<string, Index[]> = structuredClone(initial);
   const created: string[] = []; const forbidden = vi.fn();
   const client = { db: () => ({ collection: (name: string) => ({
     listIndexes: () => ({ toArray: async () => { if (!store[name]) throw new Error("ns not found"); return store[name]; } }),
+    // Read-only duplicate pre-check for unique indexes still to be created.
+    aggregate: () => ({ toArray: async () => (duplicates[name] ? [{ groups: duplicates[name] }] : []) }),
     createIndex: async (key: Index, options: Index) => { (store[name] ??= [{ name: "_id_", key: { _id: 1 } }]).push({ key, ...options }); created.push(`${name}.${options.name}`); },
     dropIndex: forbidden, dropIndexes: forbidden, insertOne: forbidden, updateOne: forbidden, deleteMany: forbidden,
   }) }) } as unknown as MongoClient;
@@ -24,13 +26,14 @@ describe("index plan", () => {
   it("is identical to the application's index contract in src/lib/database-indexes.ts", async () => {
     const { setupDatabaseIndexes } = await import("../src/lib/database-indexes");
     await setupDatabaseIndexes();
-    const fromApp = Object.fromEntries(mocks.createIndexes.mock.calls.filter(([name]) => name === "parkingSessions" || name === "vehicles" || name === "parkingTransactions"));
+    const fromApp = Object.fromEntries(mocks.createIndexes.mock.calls.filter(([name]) => name === "parkingSessions" || name === "vehicles" || name === "parkingTransactions" || name === "tariffs"));
     expect(fromApp).toEqual(JSON.parse(JSON.stringify(parkingIndexPlan)));
   });
   it("contains the unique partial index that prevents two active sessions per plate per location", () => {
     expect(parkingIndexPlan.parkingSessions).toContainEqual({ name: "parking_sessions_active_plate_unique", key: { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1 }, unique: true, partialFilterExpression: { status: "active" } });
     expect(parkingIndexPlan.vehicles.some((index) => "unique" in index)).toBe(false);
     expect(parkingIndexPlan.parkingTransactions).toContainEqual({ name: "parking_transactions_completed_session_unique", key: { tenantId: 1, parkingSessionId: 1 }, unique: true, partialFilterExpression: { status: "completed" } });
+    expect(parkingIndexPlan.tariffs).toEqual([{ name: "tariffs_location_vehicle_tariff_active_unique", key: { tenantId: 1, locationId: 1, vehicleType: 1, tariffType: 1 }, unique: true, partialFilterExpression: { status: "active" } }]);
   });
 });
 
@@ -47,28 +50,34 @@ describe("guards", () => {
 
 describe("apply", () => {
   const input = { apply: true, database: developmentDatabase };
-  it("creates the ten indexes on fresh collections and verifies them, without drops or document writes", async () => {
+  it("creates the eleven indexes on fresh collections and verifies them, without drops or document writes", async () => {
     const fake = fakeClient();
     const log = await applyParkingIndexes(fake.client, input);
-    expect(fake.created).toHaveLength(10);
-    expect(log.filter((line) => line.startsWith("PASS"))).toHaveLength(10);
+    expect(fake.created).toHaveLength(11);
+    expect(log.filter((line) => line.startsWith("PASS"))).toHaveLength(11);
     expect(fake.forbidden).not.toHaveBeenCalled();
   });
   it("is repeatable: identical indexes are skipped", async () => {
     const fake = fakeClient();
     await applyParkingIndexes(fake.client, input);
     const second = await applyParkingIndexes(fake.client, input);
-    expect(second.filter((line) => line.startsWith("SKIP"))).toHaveLength(10);
-    expect(fake.created).toHaveLength(10);
+    expect(second.filter((line) => line.startsWith("SKIP"))).toHaveLength(11);
+    expect(fake.created).toHaveLength(11);
   });
-  it("after the P4.3 apply (six indexes present) it only adds the four parkingTransactions indexes", async () => {
-    const applied = JSON.parse(JSON.stringify({ parkingSessions: parkingIndexPlan.parkingSessions, vehicles: parkingIndexPlan.vehicles }));
+  it("after the P4.5 apply (ten indexes present) it only adds the tariffs index", async () => {
+    const applied = JSON.parse(JSON.stringify({ parkingSessions: parkingIndexPlan.parkingSessions, vehicles: parkingIndexPlan.vehicles, parkingTransactions: parkingIndexPlan.parkingTransactions }));
     const fake = fakeClient(applied);
     const log = await applyParkingIndexes(fake.client, input);
-    expect(log.filter((line) => line.startsWith("SKIP"))).toHaveLength(6);
-    expect(log.filter((line) => line.startsWith("CREATED")).every((line) => line.includes("parkingTransactions."))).toBe(true);
-    expect(fake.created).toHaveLength(4);
+    expect(log.filter((line) => line.startsWith("SKIP"))).toHaveLength(10);
+    expect(log.filter((line) => line.startsWith("CREATED"))).toEqual(["CREATED tariffs.tariffs_location_vehicle_tariff_active_unique"]);
+    expect(fake.created).toEqual(["tariffs.tariffs_location_vehicle_tariff_active_unique"]);
     expect(fake.forbidden).not.toHaveBeenCalled();
+  });
+  it("stops before creating anything when active tariffs would violate the new unique index", async () => {
+    const applied = JSON.parse(JSON.stringify({ parkingSessions: parkingIndexPlan.parkingSessions, vehicles: parkingIndexPlan.vehicles, parkingTransactions: parkingIndexPlan.parkingTransactions }));
+    const fake = fakeClient(applied, { tariffs: 1 });
+    await expect(applyParkingIndexes(fake.client, input)).rejects.toThrow("violate tariffs_location_vehicle_tariff_active_unique");
+    expect(fake.created).toHaveLength(0); expect(fake.forbidden).not.toHaveBeenCalled();
   });
   it.each([
     ["same name, different options", { parkingSessions: [{ name: "parking_sessions_active_plate_unique", key: { tenantId: 1, locationId: 1, normalizedPlateSnapshot: 1 }, unique: true }] }],

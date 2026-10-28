@@ -16,3 +16,5 @@ export type { LocationParkingOverview, VehicleEntryResult, VehicleListQuery, Veh
 export { completeParkingCheckout, getParkingCheckout } from "./parking-checkout";
 export type { CheckoutQuote, CheckoutReceipt, CheckoutResult, CheckoutView } from "./parking-checkout";
 export type { TenantResourceResult } from "./platform-tenant-resources";
+export { getLocationSettings, updateLocationSettings } from "./location-settings";
+export type { LocationSettingsResult, LocationSettingsView } from "./location-settings";
