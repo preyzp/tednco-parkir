@@ -4,6 +4,17 @@
 > Verifikasi ulang 2026-10-26 tercatat di bagian berikut; snapshot lama di bawah dipertahankan sebagai riwayat.
 > Phase 1 complete dan terverifikasi pada 2026-10-18: 196 tes offline, 4 integration tests Atlas pada database test acak, lint/typecheck/build lulus. Tidak ada write/index setup pada database development.
 
+## Pengujian Operasional Tahap 1–2B, 2026-10-29
+
+- **Checkpoint sebelumnya:** P4.7 di-commit dan di-push `8e77646`; disusul `ec9a445` (aturan TednCo di AGENTS.md di luar blok Next.js) dan `a040da9` (selector Tailwind form kendaraan). Catatan "belum di-commit" di bagian P4.7 di bawah sudah usang.
+- **Tahap 1:** suite offline yang ada dijalankan ulang; tidak ada perubahan source code produksi.
+- **Tahap 2A (fixture berantai, offline):** `src/lib/dal/parking-flow.test.ts` menjalankan repository asli di atas fake MongoDB bersama (unique rule, rollback per transaksi, aggregate pendapatan): masuk → daftar aktif → checkout Menginap 2 malam → replay idempotent → dashboard → ubah pengaturan → snapshot tidak berubah → kendaraan baru memakai tarif baru.
+- **Tahap 2B (MongoDB Atlas, satu eksekusi disetujui):** `tests/integration/parking-flow.integration.ts` — repository asli, driver, transaksi dan unique index sungguhan; hanya `requirePermission` di-mock. **8/8 PASS** (15,96 s) pada database tes acak `tpk_t_2c9a81192b174cd1ae4929592c502d33`, disimpan untuk inspeksi (tanpa cleanup). Cakupan: pengaturan + konflik revisi, plat aktif unik termasuk 2 entry bersamaan, scoping lokasi/tenant, checkout Menginap dengan tarif/jam lokasi, `price_changed`, replay dan retry setelah commit, checkout bersamaan (key sama/berbeda → tepat 1 pembayaran), dashboard = total pembayaran, perubahan tarif tidak mengubah transaksi/snapshot. Snapshot read-only database development sebelum/sesudah: 14 koleksi tidak berubah. Token opt-in dihapus setelah run. Detail: `tests/integration/README.md`.
+- **Flaky test:** `tenant-resources.test.tsx` diberi batas per-file (`testTimeout` 20 s, `asyncUtilTimeout` 5 s); timeout global tidak diubah.
+- **Validasi checkpoint:** pnpm test 1259/1259 (68 file); `tsc --noEmit` exit 0 (tidak ada script `typecheck`); lint 0 masalah; `git diff --check` bersih. Build tidak dijalankan (hanya file tes/dokumentasi berubah; dev server tidak dihentikan).
+- **Database tes Atlas yang tersimpan:** `tpk_t_fddf793a3e2e4ec1b0ffc6001a8fc81a` (foundation, 2026-10-18) dan `tpk_t_2c9a81192b174cd1ae4929592c502d33` (alur parkir, 2026-10-29). Cleanup = tugas operator terpisah dengan persetujuan eksplisit.
+- **Masih pending (belum PASS):** uji browser P4.6 (input id-ID Pengaturan, dialog kendaraan aktif, konflik dua tab, checkout "(jam lokasi)", mobile & light/dark) dan P4.7 (petunjuk pending, error boundary); health check ke Atlas (`HEALTHCHECK_TOKEN` belum dikonfigurasi); E2E browser/Playwright (P8.5, belum ada framework); otorisasi sungguhan dalam alur integration (guard di-mock); kegagalan commit sungguhan (`failCommand`) tidak diinjeksi.
+
 ## P4.7 - Database Health & Reliability (Tahap A–D), 2026-10-28
 
 - **Status:** selesai di working tree, **belum di-commit/push**. Checkpoint terakhir: P4.6 di-commit dan di-push `5a2e487` (`feat: add location tariffs and operating hours settings`, `origin/master`). Database dan index **tidak berubah** di seluruh P4.7; tidak ada transaksi sungguhan dan tidak ada dependency baru.

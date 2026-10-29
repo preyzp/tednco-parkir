@@ -109,6 +109,41 @@ TESTING_STRATEGY.md. Before production deployment additionally verify staging da
 compatibility using `src/lib/database-indexes.md`. Never claim live checks passed
 from a green offline test count.
 
+## Parking flow suite (`parking-flow.integration.ts`, Tahap 2B)
+
+Runs the real repositories (`recordVehicleEntry`, `listLocationVehicles`,
+`getParkingCheckout`, `completeParkingCheckout`, `updateLocationSettings`,
+`getLocationParkingOverview`) against the real driver, transactions and unique
+indexes. Only `requirePermission` is mocked (Owner context for synthetic tenants
+and locations seeded in the test database). No fake timers. It uses the same
+guards as the foundation suite: exact opt-in token, generated database name,
+Atlas target validation, empty-namespace check, then the real index setup.
+Live-verified once on Atlas (2026-10-29, 8/8 passed, see below); every further
+run still needs a separate explicit approval.
+
+Covers: entry and unique active plate per tenant/location (including two
+concurrent entries), active list scoping, Menginap checkout at the location
+tariff/hours, `price_changed`, idempotent replay and retry after a committed
+checkout, concurrent checkouts with the same and with different keys (exactly
+one payment), completed session and empty active list, dashboard revenue equal
+to the payments, settings change after checkout with identical completed
+transactions/snapshots. Real commit failures (`failCommand`) are not injected.
+
+Run only this suite (Atlas, after approval; the opt-in is removed afterwards):
+
+```powershell
+$env:RUN_MONGODB_INTEGRATION = 'I_APPROVE_ATLAS_TEST_WRITES'
+try { pnpm test:integration tests/integration/parking-flow.integration.ts --reporter=verbose --silent=false }
+finally { Remove-Item Env:RUN_MONGODB_INTEGRATION -ErrorAction SilentlyContinue }
+```
+
+Without the file filter the foundation suite also runs and creates a second
+random database. The test database is **retained** after the run (no cleanup).
+Identify it for a later, separately approved manual cleanup by the
+`ISOLATED_TEST_DATABASE: tpk_t_<32 hex>` line printed after the empty-namespace
+check; it also contains synthetic tenants with slugs `tpk-flow-a-…`/`tpk-flow-b-…`.
+Never drop a database whose name does not match `tpk_t_` + 32 hex exactly.
+
 ## Verified Atlas run
 
 - Date: 2026-10-18; database `tpk_t_fddf793a3e2e4ec1b0ffc6001a8fc81a`.
@@ -120,3 +155,17 @@ from a green offline test count.
   active/history scope behavior, and concurrent duplicate rejection verified.
 - Shared test connection closed and opt-in environment restored. Database,
   indexes and fixtures retained; no automatic cleanup or development writes.
+
+## Verified Atlas run — parking flow (Tahap 2B)
+
+- Date: 2026-10-29; database `tpk_t_2c9a81192b174cd1ae4929592c502d33`, run once
+  with the file filter (one approved execution, no re-run).
+- Result: 8 tests passed, 0 failed; 1 file; 15.96 seconds (Vitest duration).
+- Retained for inspection with its indexes and synthetic fixtures (2 tenants,
+  3 locations, 6 sessions, 3 completed transactions totalling 36000, 5 audits);
+  no cleanup or drop. The earlier `tpk_t_fddf793a3e2e4ec1b0ffc6001a8fc81a` is
+  also retained.
+- Development database: read-only before/after snapshot (counts, indexes and
+  per-document fingerprints) of all 14 collections showed no change. Opt-in
+  token removed afterwards. `requirePermission` was mocked and no commit failure
+  was injected; this does not verify the browser UI or authentication.

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, configure, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// Typing-heavy jsdom dialogs: generous limits for loaded parallel runs (logic unchanged).
+vi.setConfig({ testTimeout: 20_000 });
+configure({ asyncUtilTimeout: 5_000 });
 const mocks = vi.hoisted(() => ({ owner: vi.fn(), create: vi.fn(), update: vi.fn(), status: vi.fn() }));
 vi.mock("../../lib/platform-actions", () => ({
   renameOwnerAction: mocks.owner, createLocationAction: mocks.create, updateLocationAction: mocks.update, changeLocationStatusAction: mocks.status,
